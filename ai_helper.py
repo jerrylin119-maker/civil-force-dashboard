@@ -1,6 +1,6 @@
 """
 民力科業務執行與督勤彙整看板系統 - AI 智能模組 (Gemini Vision OCR & 文本生成)
-支援新版 AQ. 格式與傳統 AIzaSy. 格式之 Google Gemini API (採用 x-goog-api-key Header 與 gemini-flash-latest 引擎)
+全面支援 Google Gemini API (Header x-goog-api-key 認證與 gemini-flash-lite-latest / flash-latest 雙引擎)
 """
 import os
 import json
@@ -21,12 +21,11 @@ KEY_FILE_PATH = BASE_DIR / "gemini_key.txt"
 ENV_FILE_PATH = BASE_DIR / ".env"
 
 CANDIDATE_MODELS = [
-    "gemini-flash-latest",
     "gemini-flash-lite-latest",
+    "gemini-flash-latest",
     "gemini-pro-latest",
     "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemini-1.5-pro"
+    "gemini-1.5-flash"
 ]
 
 def save_gemini_api_key(api_key: str):
@@ -91,7 +90,6 @@ def call_gemini_rest(
     if not key:
         return None
 
-    # 建構 Payload
     parts = [{"text": prompt}]
     if image_bytes:
         b64_data = base64.b64encode(image_bytes).decode("utf-8")
@@ -124,7 +122,7 @@ def call_gemini_rest(
                     "User-Agent": "CivilForceDashboard/2.2"
                 }
             )
-            with urllib.request.urlopen(req, timeout=20) as resp:
+            with urllib.request.urlopen(req, timeout=30) as resp:
                 resp_data = json.loads(resp.read().decode("utf-8"))
                 candidates = resp_data.get("candidates", [])
                 if candidates:
@@ -140,7 +138,7 @@ def call_gemini_rest(
 
 
 def test_gemini_connection(api_key: str) -> Tuple[bool, str]:
-    """測試 Gemini API Key 連線狀態 (採用 x-goog-api-key header 驗證)"""
+    """測試 Gemini API Key 連線狀態"""
     if not api_key:
         return False, "未提供 API Key"
     
@@ -174,7 +172,7 @@ def test_gemini_connection(api_key: str) -> Tuple[bool, str]:
         except Exception:
             continue
 
-    return False, "連線測試失敗：請確認網路連線或 API Key 是否複製完整。"
+    return False, "連線測試失敗：請確認網路連線或 API Key 是否正確複製。"
 
 
 def extract_event_from_image(image_input, api_key: Optional[str] = None) -> Dict[str, Any]:
@@ -194,22 +192,31 @@ def extract_event_from_image(image_input, api_key: Optional[str] = None) -> Dict
         img_bytes = buf.getvalue()
         
     prompt = """
-你是一位專業的消防局與民力科公務秘書。請仔細閱讀並分析所提供的圖片（可能是開會通知單、邀請函、公祭訃聞、公文或活動行程表）。
-請從圖片中提取關鍵公務行程資訊，並以「純 JSON 格式」輸出，不要包含任何 markdown 標記以外的多餘文字。
+你是一位專業精準的消防局與民力科公務秘書。請仔細閱讀並分析所提供的開會通知單、公文、邀請卡或公祭訃聞圖片。
+請務必精準辨識圖片中的真實文字內容，並以「純 JSON 格式」輸出，不要包含任何 markdown 標記以外的多餘文字。
+
+【重要辨識與推算規則】：
+1. 嚴格依據圖片中實際印刷文字辨識「開會事由 / 活動名稱」、「開會時間」、「地點」、「主持人/出席者」與「備註」。
+2. 日期請將民國年精確換算為西元年（例如民國115年換算為 2026年，115年8月27日 -> 2026-08-27；民國113年 -> 2024年）。
+3. 時間請轉為 24 小時制 HH:MM（例如「上午10時30分」轉換為「10:30」，「下午2時」轉換為「14:00」）。
 
 請嚴格遵循以下 JSON 欄位結構輸出：
 {
-  "title": "事由或活動名稱（例如：113年義消常訓開訓典禮、局務主管會報、故前副總隊長告別奠禮）",
-  "event_date": "活動日期，格式必須為 YYYY-MM-DD（若只有民國年請轉換為西元年，例如民國113年8月28日轉為 2024-08-28；若年份未標明請預設為當前年份）",
-  "event_time": "活動時間，格式為 HH:MM（24小時制，例如 09:30、14:00；若有公奠與家奠，請以公奠或大會時間為主）",
-  "location": "具體地點（例如：消防局6樓大禮堂、市立第一殯儀館景行廳、信義分隊前廣場）",
+  "title": "事由或活動名稱（例如：召開臺東縣消防局115年度8月份第二次專案會議）",
+  "event_date": "活動日期，格式必須為 YYYY-MM-DD（請精確換算民國年為西元年）",
+  "event_time": "活動時間，格式為 HH:MM（24小時制，例如 10:30）",
+  "location": "具體開會地點（例如：本局4樓災害應變中心）",
   "event_type": "分類（必須為以下其中一項：會議通知、公祭訃聞、邀請卡/典禮、局內公務活動、常訓/演練、其他）",
-  "attendees": "指定出席長官、受邀單位或承辦同仁（例如：局長、科長、全體義消幹部）",
-  "notes": "備註事項（包含服裝規定、攜帶文件、公奠/家奠時間註記、主辦單位聯絡窗口、訃聞家屬備註等重要提醒）"
+  "attendees": "指定出席長官、主持人或受邀人員（例如：盧東發局長、林副局長建誠、民力科長等）",
+  "notes": "備註與重要聯絡資訊（包含視訊會議網址、聯絡人分機、服裝要求等）"
 }
 """
 
-    if key and img_bytes:
+    if not key:
+        st.error("⚠️ 尚未配置 Gemini API Key！請先至【模組五：系統設定】貼上 Google Gemini 金鑰。")
+        return {}
+
+    if img_bytes:
         try:
             resp_text = call_gemini_rest(prompt=prompt, image_bytes=img_bytes, api_key=key)
             if resp_text:
@@ -224,22 +231,12 @@ def extract_event_from_image(image_input, api_key: Optional[str] = None) -> Dict
                     result = json.loads(json_match.group(0))
                     if "title" in result and "event_date" in result:
                         return result
-        except Exception:
-            pass
+        except Exception as e:
+            st.error(f"❌ Gemini Vision 辨識失敗 ({str(e)})，請確認 API Key 額度或網路連線。")
+            return {}
 
-    # 無 API Key 或失敗時的智慧 Mock 解析
-    today = date.today()
-    default_date = (today + timedelta(days=3)).strftime("%Y-%m-%d")
-    
-    return {
-        "title": "【AI辨識結果】113年度義勇消防幹部工作研討會暨表揚活動",
-        "event_date": default_date,
-        "event_time": "10:00",
-        "location": "消防局總局 8樓國際會議廳",
-        "event_type": "會議通知",
-        "attendees": "民力科全體同仁、各義消大隊/中隊長",
-        "notes": "（由 AI 視覺 OCR 自動提取）請於 09:45 前完成報到並領取資料冊；著公務制服或義消常服。"
-    }
+    st.error("❌ 無法完成圖片辨識，請確認上傳之圖片清晰度。")
+    return {}
 
 
 def extract_event_from_text(text_input: str, api_key: Optional[str] = None) -> Dict[str, Any]:
@@ -250,57 +247,48 @@ def extract_event_from_text(text_input: str, api_key: Optional[str] = None) -> D
     today = date.today()
     today_str = today.strftime("%Y-%m-%d")
 
+    if not key:
+        st.error("⚠️ 尚未配置 Gemini API Key！請先至【模組五：系統設定】配置金鑰。")
+        return {}
+
     prompt = f"""
 你是一位專業的消防局與民力科公務秘書。請仔細閱讀並分析以下使用者貼上的公務通知、會議訊息、邀請或公祭訃聞文字。
 今日基準日期為：{today_str}（民國 {today.year - 1911} 年 {today.month} 月 {today.day} 日）。
-請從文字中提取關鍵行程資訊，並以「純 JSON 格式」輸出，不要包含任何 markdown 標記以外的多餘文字。
+請從文字中精準提取關鍵行程資訊，並以「純 JSON 格式」輸出，不要包含任何 markdown 標記以外的多餘文字。
 
 請嚴格遵循以下 JSON 欄位結構輸出：
 {{
-  "title": "事由或活動名稱（例如：113年義消常訓開訓典禮、局務主管會報、故前副總隊長告別奠禮）",
-  "event_date": "活動日期，格式必須為 YYYY-MM-DD（若只有民國年請轉換為西元年，例如民國113年8月28日轉為 2024-08-28；若年份未標明請預設為當前年份）",
-  "event_time": "活動時間，格式為 HH:MM（24小時制，例如 09:30、14:00；若有公奠與家奠，請以公奠或大會時間為主）",
-  "location": "具體地點（例如：消防局6樓大禮堂、市立第一殯儀館景行廳、信義分隊前廣場）",
+  "title": "事由或活動名稱",
+  "event_date": "活動日期，格式必須為 YYYY-MM-DD（若為民國年請精確轉換為西元年）",
+  "event_time": "活動時間，格式為 HH:MM（24小時制）",
+  "location": "具體地點",
   "event_type": "分類（必須為以下其中一項：會議通知、公祭訃聞、邀請卡/典禮、局內公務活動、常訓/演練、其他）",
-  "attendees": "指定出席長官、受邀單位或承辦同仁（例如：局長、科長、全體義消幹部）",
-  "notes": "備註事項（包含服裝規定、攜帶文件、公奠/家奠時間註記、主辦單位聯絡窗口等重要提醒）"
+  "attendees": "指定出席長官、受邀單位或承辦同仁",
+  "notes": "備註事項（包含服裝規定、攜帶文件、聯絡窗口等重要提醒）"
 }}
 
 【通知文字內容】：
 {text_input}
 """
 
-    if key:
-        try:
-            resp_text = call_gemini_rest(prompt=prompt, api_key=key)
-            if resp_text:
-                cleaned = resp_text.strip()
-                if "```json" in cleaned:
-                    cleaned = cleaned.split("```json")[1].split("```")[0].strip()
-                elif "```" in cleaned:
-                    cleaned = cleaned.split("```")[1].split("```")[0].strip()
-                json_match = re.search(r'\{.*\}', cleaned, re.DOTALL)
-                if json_match:
-                    res = json.loads(json_match.group(0))
-                    if "title" in res and "event_date" in res:
-                        return res
-        except Exception:
-            pass
+    try:
+        resp_text = call_gemini_rest(prompt=prompt, api_key=key)
+        if resp_text:
+            cleaned = resp_text.strip()
+            if "```json" in cleaned:
+                cleaned = cleaned.split("```json")[1].split("```")[0].strip()
+            elif "```" in cleaned:
+                cleaned = cleaned.split("```")[1].split("```")[0].strip()
+            json_match = re.search(r'\{.*\}', cleaned, re.DOTALL)
+            if json_match:
+                res = json.loads(json_match.group(0))
+                if "title" in res and "event_date" in res:
+                    return res
+    except Exception as e:
+        st.error(f"❌ 文字解析失敗：{str(e)}")
+        return {}
 
-    # 內建啟發式智慧備用解析
-    event_type = "公祭訃聞" if ("訃聞" in text_input or "公奠" in text_input or "告別" in text_input) else ("會議通知" if "會議" in text_input else "邀請卡/典禮")
-    time_match = re.search(r'([0-2]?[0-9][：:][0-5][0-9])', text_input)
-    event_time = time_match.group(1).replace("：", ":") if time_match else "09:30"
-    
-    return {
-        "title": text_input.strip().split("\n")[0][:40],
-        "event_date": (today + timedelta(days=3)).strftime("%Y-%m-%d"),
-        "event_time": event_time,
-        "location": "消防局總局會議室 / 公祭會場",
-        "event_type": event_type,
-        "attendees": "王科長、民力科同仁",
-        "notes": "請依通知時間準時出席；注意著公務便服或制服。"
-    }
+    return {}
 
 
 def extract_doc_followup_from_text(doc_text: str, api_key: Optional[str] = None) -> Dict[str, Any]:
@@ -311,27 +299,31 @@ def extract_doc_followup_from_text(doc_text: str, api_key: Optional[str] = None)
     today = date.today()
     today_str = today.strftime("%Y-%m-%d")
 
+    if not key:
+        st.error("⚠️ 尚未配置 Gemini API Key！請先至【模組五：系統設定】配置金鑰。")
+        return {}
+
     prompt = f"""
 你是一位資深的政府機關秘書與民力業務專案專家。請仔細閱讀並分析以下使用者貼上的「重要計畫內容 / 專案實施要點 / 公文簽呈 / 函文段落」。
 這是同仁需要後續進行「業務續辦、推動列管或依限回覆」的重要案件。
 請從文字中萃取出：項目類型、字號/計畫編號、案由/主旨、來文機關/主辦單位、精確推算執行時限與依據條款、急迫等級、業務類別、建議承辦人、目前辦理狀況，以及最重要的【具體續辦/實施步驟清單 (Action Checklist)】。
 
 【基準日期】：今日日期為 {today_str}（民國 {today.year - 1911} 年 {today.month} 月 {today.day} 日）。
-請根據計畫或公文內提及之時程條款（如「文到7日內」、「於113年9月5日前」、「自即日起2週內完成開訓」等），自動換算推算出精確西元日期 (YYYY-MM-DD)。
+請根據計畫或公文內提及之時程條款（如「文到7日內」、「於115年9月5日前」等），自動換算推算出精確西元日期 (YYYY-MM-DD)。
 
-請嚴格遵循以下純 JSON 格式輸出（不要包含 markdown 標記以外的多餘文字）：
+請嚴格遵循以下純 JSON 格式輸出：
 {{
   "item_type": "項目類型（必須為以下其中一項：重要業務計畫、公文續辦、專案列管計畫、演訓專案、採購專案）",
-  "doc_number": "公文字號或計畫編號（例如：消署民字第113008899號、113民力常訓計畫-01；若無請填寫『待補編號』）",
-  "subject": "計畫名稱或公文主旨（精簡總結本案核心目的）",
-  "issuing_unit": "來文機關、指導單位或主辦科室（例如：內政部消防署、市府研考會、本局民力科）",
-  "deadline": "執行期限/預定完成日/回覆期限，格式為 YYYY-MM-DD（請換算為西元日期；若無明確時限請預設為今日起加7天）",
-  "deadline_desc": "時限條款依據或里程碑原文說明（例如：『請於文到10日內函報本署』、『預計9月20日前完成全區開訓』）",
+  "doc_number": "公文字號或計畫編號",
+  "subject": "計畫名稱或公文主旨",
+  "issuing_unit": "來文機關、指導單位或主辦科室",
+  "deadline": "執行期限/預定完成日/回覆期限，格式為 YYYY-MM-DD",
+  "deadline_desc": "時限條款依據或里程碑原文說明",
   "priority": "急迫等級（最速件 / 速件 / 普通件 / 專案列管）",
   "category": "業務類別（演訓與常年訓練 / 裝備器材採購 / 福利保險與慰問 / 義消組織與人事 / 救難團體輔導 / 綜合行政業務）",
-  "assignee": "建議負責承辦人或負責股別（例如：陳科員、訓練承辦人）",
-  "current_progress": "【目前辦理狀況】（請根據內文現況初估，例如：簽呈陳核中、名冊彙整中、規格審查中、已發文各大隊、刻正依計畫擬定中）",
-  "followup_actions": "具體應續辦/實施事項清單（請以條列式 1. 2. 3. 列出同仁後續需完成的具體行動步驟）",
+  "assignee": "建議負責承辦人或負責股別",
+  "current_progress": "【目前辦理狀況】",
+  "followup_actions": "具體應續辦/實施事項清單（條列式 1. 2. 3.）",
   "key_summary": "1-2 句話說明本案的核心交辦重點與列管目的"
 }}
 
@@ -339,41 +331,24 @@ def extract_doc_followup_from_text(doc_text: str, api_key: Optional[str] = None)
 {doc_text}
 """
 
-    if key:
-        try:
-            resp_text = call_gemini_rest(prompt=prompt, api_key=key)
-            if resp_text:
-                cleaned = resp_text.strip()
-                if "```json" in cleaned:
-                    cleaned = cleaned.split("```json")[1].split("```")[0].strip()
-                elif "```" in cleaned:
-                    cleaned = cleaned.split("```")[1].split("```")[0].strip()
-                json_match = re.search(r'\{.*\}', cleaned, re.DOTALL)
-                if json_match:
-                    res = json.loads(json_match.group(0))
-                    if "subject" in res and "deadline" in res:
-                        return res
-        except Exception:
-            pass
+    try:
+        resp_text = call_gemini_rest(prompt=prompt, api_key=key)
+        if resp_text:
+            cleaned = resp_text.strip()
+            if "```json" in cleaned:
+                cleaned = cleaned.split("```json")[1].split("```")[0].strip()
+            elif "```" in cleaned:
+                cleaned = cleaned.split("```")[1].split("```")[0].strip()
+            json_match = re.search(r'\{.*\}', cleaned, re.DOTALL)
+            if json_match:
+                res = json.loads(json_match.group(0))
+                if "subject" in res and "deadline" in res:
+                    return res
+    except Exception as e:
+        st.error(f"❌ 解析失敗：{str(e)}")
+        return {}
 
-    # 備用解析
-    lines = [l.strip() for l in doc_text.strip().split("\n") if l.strip()]
-    first_line = lines[0] if lines else "民力科業務列管案"
-    
-    return {
-        "item_type": "重要業務計畫" if "計畫" in doc_text else "公文續辦",
-        "doc_number": "府消民字第113009988號",
-        "subject": first_line[:50],
-        "issuing_unit": "本局民力科",
-        "deadline": (today + timedelta(days=7)).strftime("%Y-%m-%d"),
-        "deadline_desc": "依限於一週內完成辦理",
-        "priority": "最速件" if "速" in doc_text else "普通件",
-        "category": "演訓與常年訓練" if "訓練" in doc_text else "綜合行政業務",
-        "assignee": "陳科員",
-        "current_progress": "刻正彙整資料簽辦中",
-        "followup_actions": "1. 擬定分工簽呈與公文發文草案。\n2. 通知名冊各單位填報配合事項。\n3. 彙整核算經費並會辦主計與政風單位。",
-        "key_summary": "本案需依限續辦並完成簽呈與名冊核對工作。"
-    }
+    return {}
 
 
 def extract_doc_followup_from_image(image_input, api_key: Optional[str] = None) -> Dict[str, Any]:
@@ -382,6 +357,10 @@ def extract_doc_followup_from_image(image_input, api_key: Optional[str] = None) 
     """
     key = api_key or get_gemini_api_key()
     
+    if not key:
+        st.error("⚠️ 尚未配置 Gemini API Key！請先至【模組五：系統設定】配置金鑰。")
+        return {}
+
     img_bytes = None
     if isinstance(image_input, bytes):
         img_bytes = image_input
@@ -411,13 +390,13 @@ def extract_doc_followup_from_image(image_input, api_key: Optional[str] = None) 
   "priority": "急迫等級 (最速件 / 速件 / 普通件 / 專案列管)",
   "category": "業務類別 (演訓與常年訓練 / 裝備器材採購 / 福利保險與慰問 / 義消組織與人事 / 救難團體輔導 / 綜合行政業務)",
   "assignee": "建議承辦人",
-  "current_progress": "目前辦理狀況 (例：簽呈陳核中、名冊彙整中)",
+  "current_progress": "目前辦理狀況",
   "followup_actions": "具體應續辦事項清單 (條列式 1. 2. 3.)",
   "key_summary": "核心重點說明"
 }}
 """
 
-    if key and img_bytes:
+    if img_bytes:
         try:
             resp_text = call_gemini_rest(prompt=prompt, image_bytes=img_bytes, api_key=key)
             if resp_text:
@@ -431,23 +410,11 @@ def extract_doc_followup_from_image(image_input, api_key: Optional[str] = None) 
                     res = json.loads(json_match.group(0))
                     if "subject" in res and "deadline" in res:
                         return res
-        except Exception:
-            pass
+        except Exception as e:
+            st.error(f"❌ 辨識失敗：{str(e)}")
+            return {}
 
-    return {
-        "item_type": "公文續辦",
-        "doc_number": "消署民字第113009988號",
-        "subject": "【公文截圖AI擷取】轉發各級義勇消防人員慰問金申辦規範修訂案",
-        "issuing_unit": "內政部消防署",
-        "deadline": (today + timedelta(days=5)).strftime("%Y-%m-%d"),
-        "deadline_desc": "文到5日內轉發各分隊宣導",
-        "priority": "速件",
-        "category": "福利保險與慰問",
-        "assignee": "林科員",
-        "current_progress": "刻正擬辦轉發簽呈中",
-        "followup_actions": "1. 擬具轉發各分隊及義消大隊之通報公文。\n2. 更新科內各項慰問金申辦檢核表單與專用網址。",
-        "key_summary": "修訂慰問金申請作業流程，需於時限內完成全縣轉知與表單更新。"
-    }
+    return {}
 
 
 def generate_speech_content(
@@ -494,28 +461,7 @@ def generate_speech_content(
         except Exception:
             pass
 
-    # 內建精美備用講稿
-    return f"""# 🚒 【{theme}】{speaker}致詞稿
-
-**發布日期**：{datetime.now().strftime('%Y年%m月%d日')} ｜ **講者**：{speaker} ｜ **語氣風格**：{tone}
-
----
-
-各位長官、在座熱心奉獻的義消弟兄姊妹、各位媒體女士先生、警消同仁，大家早安、大家好！[微笑致意]
-
-今天非常高興，能夠代表消防局全體同仁，在【{theme}】這個深具意義的日子裡，與大家齊聚一堂。
-
-### 一、 肯定辛勞與無私奉獻
-各位義消夥伴與協勤民力，一直以來都是我們消防局最堅實的後盾。無論是深夜的火警搶救、颱風豪雨的防汛搜救，抑或是平時的防火防災宣導，大家總是拋下身邊的工作與家庭，第一時間趕赴現場，為守護鄉親的身家財產安全全力以赴！[眼神堅定，致上最高敬意]
-
-### 二、 核心施政與裝備精進
-誠如大家所見，{key_points}。局裡未來將持續爭取更充實的預算，為大家升級更安全的個人防護裝備、強化專業科技訓練，並落實各項福利保障，讓每位走在救災前線的民力英雄，都能在最安全的環境下出勤、平安歸來！
-
-### 三、 祝賀與結語
-最後，再次感謝全體義消夥伴與各界長官的大力支持。祝福今天的活動圓滿成功，也祝福在場所有的長官、貴賓與同仁，身體健康、家庭美滿、工作順利、每次出勤救災都平安圓滿！
-
-謝謝大家！[全場鞠躬致謝]
-"""
+    return f"""# 🚒 【{theme}】{speaker}致詞稿\n\n**發布日期**：{datetime.now().strftime('%Y年%m月%d日')} ｜ **講者**：{speaker} ｜ **語氣風格**：{tone}\n\n---\n\n各位長官、在座熱心奉獻的義消弟兄姊妹、各位媒體女士先生、警消同仁，大家早安、大家好！[微笑致意]\n\n今天非常高興，能夠代表消防局全體同仁，在【{theme}】這個深具意義的日子裡，與大家齊聚一堂。\n\n### 一、 肯定辛勞與無私奉獻\n各位義消夥伴與協勤民力，一直以來都是我們消防局最堅實的後盾。無論是深夜的火警搶救、颱風豪雨的防汛搜救，抑或是平時的防火防災宣導，大家總是拋下身邊的工作與家庭，第一時間趕赴現場，為守護鄉親的身家財產安全全力以赴！[眼神堅定，致上最高敬意]\n\n### 二、 核心施政與裝備精進\n誠如大家所見，{key_points}。局裡未來將持續爭取更充實的預算，為大家升級更安全的個人防護裝備、強化專業科技訓練，並落實各項福利保障，讓每位走在救災前線的民力英雄，都能在最安全的環境下出勤、平安歸來！\n\n### 三、 祝賀與結語\n最後，再次感謝全體義消夥伴與各界長官的大力支持。祝福今天的活動圓滿成功，也祝福在場所有的長官、貴賓與同仁，身體健康、家庭美滿、工作順利、每次出勤救災都平安圓滿！\n\n謝謝大家！[全場鞠躬致謝]"""
 
 
 def generate_press_content(
@@ -558,27 +504,7 @@ def generate_press_content(
         except Exception:
             pass
 
-    return f"""# 📰 【新聞發布】{headline}
-
-**發稿單位**：消防局民力科 ｜ **發稿日期**：{datetime.now().strftime('%Y年%m月%d日')} ｜ **聯絡人**：民力科新聞聯絡窗口
-
----
-
-### 【主旨導言】
-為強化全縣防救災能量、凝聚民力向心力，消防局於今日隆重舉行「{headline}」。活動現場冠蓋雲集，充分展現義消民力與警消攜手守護鄉親安全的堅定決心。
-
-### 【長官期許與施政亮點】
-{speaker}於會中特別指出：「{key_quotes if key_quotes else '民力是消防最堅強的後盾，感謝全體義消夥伴長年無私奉獻。'}」消防局近年來積極爭取中央與地方資源，全面汰換升級防護裝備，並結合智慧科技與社區韌性推動，打造更完善的救災防護網。
-
-### 【現場感人事蹟與具體成效】
-{hero_story if hero_story else '活動中特別表揚多位長年協勤之資深義消幹部，其熱心公益、捨己為人的精神，深獲地方鄉親高度肯定與讚揚。'}
-
----
-**【新聞聯絡資訊】**
-- 發布機關：臺東縣消防局民力科
-- 聯絡電話：(089) 322-119 分機 205
-- 電子信箱：civil_force@ttfd.gov.tw
-"""
+    return f"""# 📰 【新聞發布】{headline}\n\n**發稿單位**：消防局民力科 ｜ **發稿日期**：{datetime.now().strftime('%Y年%m月%d日')} ｜ **聯絡人**：民力科新聞聯絡窗口\n\n---\n\n### 【主旨導言】\n為強化全縣防救災能量、凝聚民力向心力，消防局於今日隆重舉行「{headline}」。活動現場冠蓋雲集，充分展現義消民力與警消攜手守護鄉親安全的堅定決心。\n\n### 【長官期許與施政亮點】\n{speaker}於會中特別指出：「{key_quotes if key_quotes else '民力是消防最堅強的後盾，感謝全體義消夥伴長年無私奉獻。'}」消防局近年來積極爭取中央與地方資源，全面汰換升級防護裝備，並結合智慧科技與社區韌性推動，打造更完善的救災防護網。\n\n### 【現場感人事蹟與具體成效】\n{hero_story if hero_story else '活動中特別表揚多位長年協勤之資深義消幹部，其熱心公益、捨己為人的精神，深獲地方鄉親高度肯定與讚揚。'}"""
 
 # 函式名稱相容別名
 generate_speech = generate_speech_content
