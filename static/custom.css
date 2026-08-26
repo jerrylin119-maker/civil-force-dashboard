@@ -1,0 +1,204 @@
+/* 民力科業務執行與督勤彙整看板系統 - 響應式主題樣式表 */
+
+/* 全局字體與平滑滾動 */
+html, body, [class*="css"] {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+}
+
+/* 主看板標題列 */
+.main-header {
+    background: linear-gradient(135deg, #1e3a8a 0%, #0f172a 100%);
+    color: white;
+    padding: 1.2rem 1.5rem;
+    border-radius: 12px;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.main-header h1 {
+    font-size: 1.6rem;
+    font-weight: 700;
+    margin: 0;
+    color: #ffffff !important;
+}
+
+.main-header p {
+    font-size: 0.9rem;
+    color: #cbd5e1;
+    margin: 0.3rem 0 0 0;
+}
+
+/* KPI 統計卡片 */
+.kpi-card {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 1rem 1.2rem;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.06);
+}
+
+.kpi-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #64748b;
+    margin-bottom: 0.4rem;
+}
+
+.kpi-value {
+    font-size: 1.8rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+/* 狀態徽章 (Badges) */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.25rem 0.6rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    border-radius: 9999px;
+    line-height: 1;
+}
+
+.badge-urgent {
+    background-color: #fee2e2;
+    color: #b91c1c;
+    border: 1px solid #f87171;
+    animation: pulse-red 2s infinite;
+}
+
+.badge-warning {
+    background-color: #fef3c7;
+    color: #b45309;
+    border: 1px solid #fcd34d;
+}
+
+.badge-success {
+    background-color: #dcfce7;
+    color: #15803d;
+    border: 1px solid #86efac;
+}
+
+.badge-info {
+    background-color: #e0f2fe;
+    color: #0369a1;
+    border: 1px solid #7dd3fc;
+}
+
+.badge-neutral {
+    background-color: #f1f5f9;
+    color: #475569;
+    border: 1px solid #cbd5e1;
+}
+
+@keyframes pulse-red {
+    0% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+    }
+    70% {
+        box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+    }
+}
+
+/* 行動端公文卡片 */
+.doc-card {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-left: 4px solid #3b82f6;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 0.8rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+}
+
+.doc-card.urgent {
+    border-left-color: #ef4444;
+    background: #fffafa;
+}
+
+.doc-card.warning {
+    border-left-color: #f59e0b;
+    background: #fffdf5;
+}
+
+.doc-card.completed {
+    border-left-color: #10b981;
+    opacity: 0.85;
+}
+
+/* 行事曆事件卡片 */
+.event-card {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 1rem;
+    margin-bottom: 0.8rem;
+}
+
+.event-date-badge {
+    background: #eff6ff;
+    color: #1d4ed8;
+    font-weight: 700;
+    padding: 0.4rem 0.6rem;
+    border-radius: 6px;
+    text-align: center;
+    min-width: 60px;
+}
+
+/* 督勤覆蓋率單位卡片 */
+.coverage-unit-card {
+    border-radius: 8px;
+    padding: 0.8rem;
+    text-align: center;
+    margin-bottom: 0.6rem;
+    border: 1px solid rgba(0,0,0,0.06);
+    font-weight: 500;
+}
+
+.coverage-high {
+    background-color: #dcfce7;
+    color: #166534;
+    border-color: #86efac;
+}
+
+.coverage-medium {
+    background-color: #fef3c7;
+    color: #92400e;
+    border-color: #fcd34d;
+}
+
+.coverage-low {
+    background-color: #fee2e2;
+    color: #991b1b;
+    border-color: #fca5a5;
+}
+
+/* 手機端排版強化 */
+@media (max-width: 768px) {
+    .main-header {
+        padding: 1rem;
+    }
+    .main-header h1 {
+        font-size: 1.25rem;
+    }
+    .kpi-value {
+        font-size: 1.4rem;
+    }
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 4px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        padding: 8px 10px;
+        font-size: 0.85rem;
+    }
+}
