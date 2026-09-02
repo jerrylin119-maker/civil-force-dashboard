@@ -837,25 +837,180 @@ def render_inspection_module():
                     if insp.deficiencies:
                         st.markdown(f"**⚠️ 缺失改善要求（處置：【{dm_txt}】）：**\n{insp.deficiencies}")
 
-                    # 重新生成 Word 檔案下載
-                    h_buf = generate_inspection_docx(
-                        unit_name=insp.target_unit,
-                        inspect_date=insp.inspect_date.strftime('%Y-%m-%d'),
-                        inspector=insp.inspector,
-                        focus_items=items_list,
-                        strengths=insp.strengths or "",
-                        deficiencies=insp.deficiencies or "",
-                        merit_status=m_txt,
-                        demerit_status=dm_txt,
-                        report_text=insp.report_text or ""
-                    )
-                    st.download_button(
-                        label="📥 重新下載此份 Word (.docx) 督勤報告",
-                        data=h_buf,
-                        file_name=f"臺東縣消防局督勤報告_{insp.target_unit}_{insp.inspect_date.strftime('%Y%m%d')}.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        key=f"dl_hist_{insp.id}"
-                    )
+                    # 操作按鈕群
+                    col_b1, col_b2, col_b3 = st.columns([1.2, 1.2, 1])
+                    with col_b1:
+                        # 重新生成 Word 檔案下載
+                        h_buf = generate_inspection_docx(
+                            unit_name=insp.target_unit,
+                            inspect_date=insp.inspect_date.strftime('%Y-%m-%d'),
+                            inspector=insp.inspector,
+                            focus_items=items_list,
+                            strengths=insp.strengths or "",
+                            deficiencies=insp.deficiencies or "",
+                            merit_status=m_txt,
+                            demerit_status=dm_txt,
+                            report_text=insp.report_text or ""
+                        )
+                        st.download_button(
+                            label="📥 下載 Word (.docx) 報告",
+                            data=h_buf,
+                            file_name=f"臺東縣消防局督勤報告_{insp.target_unit}_{insp.inspect_date.strftime('%Y%m%d')}_{insp.id}.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            key=f"dl_hist_{insp.id}",
+                            use_container_width=True
+                        )
+
+                    with col_b2:
+                        pass
+
+                    # ── 區塊 A：編輯修改督勤紀錄表單 ──
+                    with st.expander(f"✏️ 編輯修改【{insp.target_unit}】此筆督勤紀錄", expanded=False):
+                        with st.form(f"edit_insp_form_{insp.id}"):
+                            st.markdown("##### 🏢 基本資訊修改")
+                            ec1, ec2, ec3 = st.columns(3)
+                            with ec1:
+                                all_unit_names = [u.unit_name for u in units]
+                                u_idx = all_unit_names.index(insp.target_unit) if insp.target_unit in all_unit_names else 0
+                                edit_unit = st.selectbox("受督導單位", all_unit_names, index=u_idx, key=f"eu_{insp.id}")
+                            with ec2:
+                                edit_date = st.date_input("督勤日期", value=insp.inspect_date, key=f"ed_{insp.id}")
+                            with ec3:
+                                edit_inspector = st.text_input("督勤人員", value=insp.inspector, key=f"eins_{insp.id}")
+
+                            st.markdown("##### ⚖️ 處置判定修改")
+                            em1, em2 = st.columns(2)
+                            with em1:
+                                merit_opts = ["口頭嘉勉", "優績", "符合良好"]
+                                m_idx = merit_opts.index(m_txt) if m_txt in merit_opts else 0
+                                edit_merit = st.selectbox("優良處置判定", merit_opts, index=m_idx, key=f"em_{insp.id}")
+                            with em2:
+                                demerit_opts = ["無重大缺失事項", "請主管立即改善", "劣蹟註記"]
+                                dm_idx = demerit_opts.index(dm_txt) if dm_txt in demerit_opts else 0
+                                edit_demerit = st.selectbox("缺失處置判定", demerit_opts, index=dm_idx, key=f"edm_{insp.id}")
+
+                            st.markdown("##### 🔍 查核項目與現場狀況修改")
+                            edited_items = []
+                            for it_i, it_obj in enumerate(items_list):
+                                st.write(f"**項目 {it_i+1}：{it_obj.get('name', '查核項目')}**")
+                                c_er, c_en = st.columns([1, 2.5])
+                                with c_er:
+                                    res_options = ["☑ 符合規範", "☒ 待改善", "ℹ 宣導提醒", "➖ 不適用"]
+                                    cur_res = it_obj.get('result', '☑ 符合規範')
+                                    clean_cur_res = cur_res.split(" / ")[0]
+                                    matching_res_idx = next((ri for ri, ro in enumerate(res_options) if clean_cur_res in ro), 0)
+                                    e_res = st.selectbox("結果", res_options, index=matching_res_idx, key=f"eres_{insp.id}_{it_i}")
+                                with c_en:
+                                    e_note = st.text_input("狀況說明", value=it_obj.get('note', ''), key=f"enote_{insp.id}_{it_i}")
+                                
+                                edited_items.append({
+                                    "category": it_obj.get("category", "重點"),
+                                    "name": it_obj.get("name", ""),
+                                    "result": e_res.split(" / ")[0],
+                                    "note": e_note.strip() if e_note.strip() else "查核良好"
+                                })
+
+                            st.markdown("##### 📝 補充說明與改善要求")
+                            edit_str = st.text_area("補充優良說明", value=insp.strengths or "", height=70, key=f"estr_{insp.id}")
+                            edit_def = st.text_area("改善要求說明", value=insp.deficiencies or "", height=70, key=f"edef_{insp.id}")
+
+                            if st.form_submit_button("💾 儲存修改並更新報告", type="primary", use_container_width=True):
+                                # 重新合成 Markdown 報告
+                                good_items_e = []
+                                defect_items_e = []
+                                for it_e in edited_items:
+                                    res_val_e = it_e['result']
+                                    if any(k in res_val_e for k in ["待改善", "需追蹤", "缺失", "不符", "☒"]):
+                                        ds = synthesize_defect_sentence(it_e)
+                                        if ds:
+                                            defect_items_e.append(f"{len(defect_items_e)+1}. {ds}")
+                                    else:
+                                        gs = synthesize_inspection_sentence(it_e)
+                                        if gs:
+                                            good_items_e.append(f"{len(good_items_e)+1}. {gs}")
+
+                                m_phrase = {"口頭嘉勉": "給予口頭嘉勉", "優績": "給予優績", "符合良好": "符合良好"}.get(edit_merit, f"給予{edit_merit}")
+                                dm_phrase = {"劣蹟註記": "給予劣蹟註記", "請主管立即改善": "請主管立即改善", "無重大缺失事項": "無重大缺失事項"}.get(edit_demerit, f"給予{edit_demerit}")
+
+                                sec2_p = []
+                                if good_items_e:
+                                    sec2_p.extend(good_items_e)
+                                else:
+                                    sec2_p.append("現場各項常態業務查核運作良好。")
+                                if edit_str.strip():
+                                    sec2_p.append(f"\n**【補充說明】**：\n{edit_str.strip()}")
+                                sec2_p.append(f"\n📌 **總結處置**：現場整體運作良好，**{m_phrase}**。")
+                                sec2_text = "\n".join(sec2_p)
+
+                                sec3_p = []
+                                if defect_items_e:
+                                    sec3_p.extend(defect_items_e)
+                                if edit_def.strip():
+                                    sec3_p.append(f"\n**【改善要求】**：\n{edit_def.strip()}")
+                                if sec3_p or edit_demerit in ["劣蹟註記", "請主管立即改善"]:
+                                    if not sec3_p:
+                                        sec3_p.append("現場查有待改善事項，列管督導。")
+                                    sec3_p.append(f"\n⚠️ **處置要求**：現場查核缺失事項列管追蹤，**{dm_phrase}**。")
+                                    sec3_text = "\n".join(sec3_p)
+                                else:
+                                    sec3_text = "經現場各項重點查核，本次督勤無重大缺失事項。"
+
+                                new_report_md = f"""# 臺東縣消防局民力科 督勤與業務查核紀錄表
+
+- **受督導單位**：{edit_unit}
+- **督勤日期**：{edit_date.strftime('%Y-%m-%d')}
+- **督勤人員**：{edit_inspector}
+- **綜合督勤處置**：🌟 【優良處置】：`{edit_merit}` ｜ ⚠️ 【缺失處置】：`{edit_demerit}`
+
+---
+
+### 一、 督導重點事項查核與宣導紀要
+"""
+                                for idx_e, it_e in enumerate(edited_items, 1):
+                                    cat_l = f"[{it_e.get('category', '重點')}] " if it_e.get('category') != '常態督勤' else ""
+                                    new_report_md += f"{idx_e}. **{cat_l}{it_e['name']}**\n   - 查核結果：`{it_e['result']}` ｜ 現場狀況：{it_e['note']}\n"
+
+                                new_report_md += f"""
+---
+
+### 二、 督導所見事項彙整（處置判定：【{edit_merit}】）
+{sec2_text}
+
+---
+
+### 三、 督導缺失事項與處置要求（處置判定：【{edit_demerit}】）
+{sec3_text}
+
+---
+*督勤同仁簽章：{edit_inspector}　　受督單位主管簽章：___________　　科長核閱：___________*
+"""
+
+                                # 更新資料庫物件
+                                insp.target_unit = edit_unit
+                                insp.inspect_date = edit_date
+                                insp.inspector = edit_inspector
+                                insp.merit_status = edit_merit
+                                insp.demerit_status = edit_demerit
+                                insp.focus_items = json.dumps(edited_items, ensure_ascii=False)
+                                insp.strengths = edit_str.strip()
+                                insp.deficiencies = edit_def.strip()
+                                insp.report_text = new_report_md
+                                db.commit()
+                                st.success(f"🎉 已成功更新【{edit_unit}】的督勤紀錄與報告！")
+                                st.rerun()
+
+                    # ── 區塊 B：刪除督勤紀錄 ──
+                    with st.expander("🗑️ 刪除此筆督勤紀錄", expanded=False):
+                        st.warning(f"⚠️ 請確認是否要永久刪除【{insp.target_unit}】於 {insp.inspect_date.strftime('%Y-%m-%d')} 之督勤紀錄？此操作無法復原。")
+                        col_d1, col_d2 = st.columns([2, 1])
+                        with col_d1:
+                            confirm_del = st.checkbox("我確認要永久刪除此紀錄", key=f"conf_del_{insp.id}")
+                        with col_d2:
+                            if st.button("🗑️ 確定刪除", type="secondary", disabled=not confirm_del, key=f"btn_del_{insp.id}", use_container_width=True):
+                                db.delete(insp)
+                                db.commit()
+                                st.success(f"✅ 已成功刪除【{insp.target_unit}】的督勤紀錄！")
+                                st.rerun()
 
     finally:
         db.close()
