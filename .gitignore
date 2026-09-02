@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+gemini_key.txt
+.streamlit/secrets.toml
+civil_force.db-journal
+uploads/

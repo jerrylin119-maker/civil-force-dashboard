@@ -165,9 +165,12 @@ def render_documents_module():
                         if st.button("✨ 啟動 Gemini Vision 截圖 OCR 辨識與計畫擷取", type="primary", use_container_width=True):
                             with st.spinner("🤖 Gemini Vision 正在 OCR 掃描截圖並提取計畫重點、時限與辦理狀況..."):
                                 extracted_res = extract_doc_followup_from_image(uploaded_doc_img)
-                                st.session_state["doc_extracted_data"] = extracted_res
-                                st.session_state["doc_raw_input"] = "[來自截圖辨識]"
-                                st.rerun()
+                                if extracted_res and extracted_res.get("subject"):
+                                    st.session_state["doc_extracted_data"] = extracted_res
+                                    st.session_state["doc_raw_input"] = "[來自截圖辨識]"
+                                    st.rerun()
+                                else:
+                                    st.error("❌ 辨識失敗：未從截圖中解析出有效文字。請確認截圖清晰度或重新上傳。")
 
             # 顯示 AI 擷取成果與確認存檔表單
             if "doc_extracted_data" in st.session_state and st.session_state["doc_extracted_data"]:

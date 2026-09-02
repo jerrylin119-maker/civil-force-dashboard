@@ -9,23 +9,25 @@ from datetime import datetime
 from database import get_db, FireUnit, InspectionFocusItem, User, init_db
 from ai_helper import test_gemini_connection, get_gemini_api_key
 from config import DB_PATH
+from git_sync_helper import run_git_sync
 
 def render_settings_module():
     st.markdown(
         """
         <div class="main-header">
             <h1>⚙️ 模組五：系統設定與資料庫管理</h1>
-            <p>Gemini API 金鑰設定、轄內單位主檔管理、督勤重點項目庫維護、資料庫備份與重設</p>
+            <p>Gemini API 金鑰設定、轄內單位主檔管理、督勤重點項目庫維護、GitHub 一鍵雲端同步</p>
         </div>
         """,
         unsafe_allow_html=True
     )
 
-    tab_api, tab_units, tab_items, tab_db = st.tabs([
+    tab_api, tab_units, tab_items, tab_db, tab_git = st.tabs([
         "🔑 Gemini API 金鑰與模型設定",
         "🏢 轄內消防/義消單位主檔管理",
         "📋 督勤重點項目庫維護",
-        "💾 資料庫備份與重設"
+        "💾 資料庫備份與重設",
+        "🚀 一鍵同步至 GitHub 雲端"
     ])
 
     db = get_db()
@@ -175,6 +177,60 @@ def render_settings_module():
                 init_db()
                 st.success("✅ 資料庫已成功檢查並補齊種子資料！")
                 st.rerun()
+
+        # ==========================================
+        # TAB 5: 一鍵同步至 GitHub 雲端
+        # ==========================================
+        with tab_git:
+            st.subheader("🚀 一鍵自動同步更新至 GitHub 雲端倉庫")
+            
+            st.markdown(
+                """
+                <div style="background: #f0fdf4; border-left: 4px solid #16a34a; padding: 12px 16px; border-radius: 6px; font-size: 0.9rem; color: #166534; margin-bottom: 1.2rem;">
+                    <b>💡 為什麼需要一鍵同步？</b><br>
+                    • 當您在本地電腦修改了代碼、自訂了督導狀況詞庫或完成更新後，<b>只要點擊下方按鈕，系統會自動將所有變更推送到 GitHub</b>！<br>
+                    • <b>完全自動化</b>：GitHub 收到推送後，<b>Streamlit 雲端伺服器會在 15~30 秒內自動拉取並重啟生效</b>，手機與全體同仁立即看到最新版本！
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+            col_g1, col_g2 = st.columns([1.3, 1])
+            with col_g1:
+                with st.container(border=True):
+                    st.markdown("##### 📦 方式一：網頁介面直接一鍵推送")
+                    st.caption("自動執行 `git add .` ➔ `git commit` ➔ `git push origin main`")
+                    
+                    commit_msg_input = st.text_input(
+                        "更新版本說明 (Commit Message)",
+                        value=f"更新看板與督勤詞庫: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+                        placeholder="輸入本次更新的說明"
+                    )
+                    
+                    if st.button("🚀 立即一鍵自動同步至 GitHub", type="primary", use_container_width=True):
+                        with st.spinner("正在自動加入變更、打包版本並推送至 GitHub 倉庫中..."):
+                            success, msg = run_git_sync(commit_msg_input)
+                            if success:
+                                st.success(msg)
+                                st.balloons()
+                            else:
+                                st.error(msg)
+                                st.info("💡 提示：若出現權限錯誤，可直接使用右側的 Windows 批次檔進行推送。")
+
+            with col_g2:
+                with st.container(border=True):
+                    st.markdown("##### 💻 方式二：Windows 桌面一鍵批次檔")
+                    st.markdown(
+                        """
+                        專案目錄內已建立專用批次檔：<br>
+                        👉 <code>一鍵上傳到GitHub.bat</code><br><br>
+                        <b>使用方式</b>：<br>
+                        1. 打開專案資料夾。<br>
+                        2. <b>滑鼠雙擊 <code>一鍵上傳到GitHub.bat</code></b>。<br>
+                        3. 視窗會全自動完成所有推送作業並顯示綠色成功訊息！
+                        """,
+                        unsafe_allow_html=True
+                    )
 
     finally:
         db.close()

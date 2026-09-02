@@ -139,19 +139,23 @@ def render_calendar_module():
                     if st.button("✨ 啟動 Gemini Vision 視覺 OCR 智能辨識", type="primary", use_container_width=True):
                         with st.spinner("🤖 Gemini 視覺模型正在深度掃描圖片文字、日期、時間與地點中..."):
                             parsed_data = extract_event_from_image(uploaded_image)
-                            st.session_state["parsed_event_data"] = parsed_data
-                            
-                            # 儲存圖片至本機 uploads
-                            file_ext = uploaded_image.name.split(".")[-1] if hasattr(uploaded_image, "name") and "." in uploaded_image.name else "jpg"
-                            save_filename = f"event_ocr_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{file_ext}"
-                            save_path = UPLOAD_DIR / save_filename
-                            try:
-                                pil_img = Image.open(uploaded_image)
-                                pil_img.save(save_path)
-                                st.session_state["saved_img_path"] = str(save_path)
-                            except Exception:
-                                st.session_state["saved_img_path"] = ""
-                            st.rerun()
+                            if parsed_data and parsed_data.get("title"):
+                                st.session_state["parsed_event_data"] = parsed_data
+                                st.session_state.pop("ocr_error", None)
+                                
+                                # 儲存圖片至本機 uploads
+                                file_ext = uploaded_image.name.split(".")[-1] if hasattr(uploaded_image, "name") and "." in uploaded_image.name else "jpg"
+                                save_filename = f"event_ocr_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{file_ext}"
+                                save_path = UPLOAD_DIR / save_filename
+                                try:
+                                    pil_img = Image.open(uploaded_image)
+                                    pil_img.save(save_path)
+                                    st.session_state["saved_img_path"] = str(save_path)
+                                except Exception:
+                                    st.session_state["saved_img_path"] = ""
+                                st.rerun()
+                            else:
+                                st.error("❌ 辨識失敗：未從圖片中解析出有效文字。請確認圖片清晰度、無強烈反光，或重試一次。")
 
         # ==========================================
         # 通用確認與存入行事曆表單 (不管是貼文字或拍照辨識皆在此確認)

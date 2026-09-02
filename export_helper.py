@@ -17,6 +17,82 @@ def set_cell_background(cell, color_hex: str):
     shading_elm = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{color_hex}"/>')
     cell._tc.get_or_add_tcPr().append(shading_elm)
 
+def synthesize_inspection_sentence(item: dict) -> str:
+    """將單一查核重點項目與現場狀況轉換為通順標準公文敘述句 (未檢查/不適用則回傳空字串)"""
+    name = item.get("name", item.get("item_name", "")).strip()
+    note = item.get("note", "").strip().rstrip("。，,. ")
+    cat = item.get("category", "").strip()
+    res = item.get("result", "").strip()
+    
+    # 若為不適用 / 未查，回傳空字串 (不列出)
+    if any(k in res for k in ["不適用", "未查", "➖"]):
+        return ""
+        
+    # 1. 義消專長資料庫
+    if "專長資料庫" in name or "專長資料庫" in cat:
+        if note and note not in ["查核良好", "正常", "良好"]:
+            clean_n = note.replace("承辦人", "").replace("分隊", "").strip("已，。 ")
+            if "設定" in clean_n or "書籤" in clean_n or "更新" in clean_n:
+                return f"抽查本科建置義消專長資料庫執行情形，分隊有定期更新及{clean_n}。"
+            else:
+                return f"抽查本科建置義消專長資料庫執行情形，{note}。"
+        else:
+            return "抽查本科建置義消專長資料庫執行情形，分隊有定期更新及設定專用網址為書籤。"
+            
+    # 2. 訓練與出勤紀錄
+    elif "訓練" in name and "出勤" in name:
+        if note and note not in ["查核良好", "正常", "良好"]:
+            return f"抽查本月義消定期訓練及出勤紀錄核實情形，{note}。"
+        else:
+            return "抽查本月義消定期訓練及出勤紀錄核實情形，相關簽到與出勤紀錄均核實完備，查核良好。"
+            
+    # 3. 補助款規定熟悉度
+    elif "補助款" in name:
+        if note and note not in ["查核良好", "正常", "良好"]:
+            return f"抽查分隊辦理義消申請議員建議補助款熟悉度，{note}。"
+        else:
+            return "抽查分隊辦理義消申請議員建議補助款熟悉度，分隊承辦人員熟悉相關作業規定，查核良好。"
+            
+    # 4. 訓練安全管理
+    elif "訓練安全管理" in name or ("訓練" in name and "安全管理" in name):
+        if note and note not in ["查核良好", "正常", "良好"]:
+            return f"抽查分隊辦理義消訓練安全管理執行情形，{note}。"
+        else:
+            return "抽查分隊辦理義消訓練安全管理執行情形，均依訓練安全管理程序書落實安全管制，查核良好。"
+            
+    # 5. 義消推動制度了解
+    elif "推動的義消制度" in name or "義消制度" in name:
+        if note and note not in ["查核良好", "正常", "良好"]:
+            return f"訪詢同仁對於今年本局推動義消制度之了解程度，{note}。"
+        else:
+            return "訪詢同仁對於今年本局推動之各項義消新制度，現場同仁均充分理解並落實推動。"
+            
+    # 6. 其他/新業務自訂項目
+    else:
+        clean_name = name.replace("是否有", "之").replace("是否", "之").replace("？", "").replace("?", "").strip()
+        if not any(clean_name.startswith(p) for p in ["抽查", "查核", "訪詢", "檢視", "督導"]):
+            clean_name = f"抽查{clean_name}"
+            
+        if note and note not in ["查核良好", "正常", "良好"]:
+            return f"{clean_name}執行情形，{note}。"
+        else:
+            return f"{clean_name}執行情形，現場查核運作良好。"
+
+
+def synthesize_defect_sentence(item: dict) -> str:
+    """將缺失項目轉換為通順標準公文敘述句"""
+    name = item.get("name", item.get("item_name", "")).strip()
+    note = item.get("note", "").strip()
+    
+    clean_name = name.replace("是否有", "之").replace("是否", "之").replace("？", "").replace("?", "").strip()
+    if not any(clean_name.startswith(p) for p in ["抽查", "查核", "訪詢", "檢視", "督導"]):
+        clean_name = f"抽查{clean_name}"
+        
+    if note and note not in ["查核良好", "正常", "良好"]:
+        return f"{clean_name}：{note}（列管限期改善）"
+    else:
+        return f"{clean_name}：現場查核發現缺失事項，請分隊長立即督導改善。"
+
 def generate_inspection_docx(
     unit_name: str,
     inspect_date: str,
@@ -147,33 +223,107 @@ def generate_inspection_docx(
 
     doc.add_paragraph()
 
-    # 優點與具體事蹟 (優績 / 口頭嘉勉)
+    # 自動彙整督導所見良好事項與缺失事項 (未檢查者自動濾除，已檢查者轉換為通順公文語句)
+    good_items = []
+    defect_items = []
+    for it in focus_items:
+        res_val = it.get("result", "")
+        if any(k in res_val for k in ["待改善", "需追蹤", "缺失", "不符", "☒"]):
+            defect_sentence = synthesize_defect_sentence(it)
+            if defect_sentence:
+                defect_items.append(f"{len(defect_items)+1}. {defect_sentence}")
+        else:
+            good_sentence = synthesize_inspection_sentence(it)
+            if good_sentence:
+                good_items.append(f"{len(good_items)+1}. {good_sentence}")
+
+    merit_summary_map = {
+        "口頭嘉勉": "給予口頭嘉勉",
+        "優績": "給予優績",
+        "符合良好": "符合良好"
+    }
+    merit_phrase = merit_summary_map.get(merit_status, f"給予{merit_status}")
+
+    demerit_summary_map = {
+        "劣蹟註記": "給予劣蹟註記",
+        "請主管立即改善": "請主管立即改善",
+        "無重大缺失事項": "無重大缺失事項"
+    }
+    demerit_phrase = demerit_summary_map.get(demerit_status, f"給予{demerit_status}")
+
+    # 二、 督導所見事項彙整 (優績 / 口頭嘉勉)
     h3 = doc.add_paragraph()
-    r_h3 = h3.add_run(f"二、 現場優良事蹟與獎勵處置（處置判定：【{merit_status}】）")
+    r_h3 = h3.add_run(f"二、 督導所見事項彙整（處置判定：【{merit_status}】）")
     r_h3.font.name = "微軟正黑體"
     r_h3.font.size = Pt(13)
     r_h3.font.bold = True
     r_h3.font.color.rgb = RGBColor(15, 23, 42)
 
-    p_str = doc.add_paragraph(strengths if strengths else "現場運作良好，無特別註記。")
-    for r in p_str.runs:
+    if good_items:
+        for gi in good_items:
+            p_g = doc.add_paragraph(gi)
+            for r in p_g.runs:
+                r.font.name = "微軟正黑體"
+                r.font.size = Pt(10)
+    else:
+        p_g = doc.add_paragraph("現場各項常態業務查核運作良好。")
+        for r in p_g.runs:
+            r.font.name = "微軟正黑體"
+            r.font.size = Pt(10)
+
+    if strengths and strengths.strip():
+        p_str = doc.add_paragraph(f"【補充說明】：{strengths.strip()}")
+        for r in p_str.runs:
+            r.font.name = "微軟正黑體"
+            r.font.size = Pt(10)
+
+    p_merit_concl = doc.add_paragraph(f"📌 總結處置：現場整體運作良好，{merit_phrase}。")
+    for r in p_merit_concl.runs:
         r.font.name = "微軟正黑體"
         r.font.size = Pt(10.5)
+        r.font.bold = True
+        r.font.color.rgb = RGBColor(21, 128, 61)
 
     doc.add_paragraph()
 
-    # 缺失與建議改善事項 (劣蹟註記 / 請主管立即改善)
+    # 三、 督導缺失事項與處置要求 (劣蹟註記 / 請主管立即改善)
     h4 = doc.add_paragraph()
-    r_h4 = h4.add_run(f"三、 缺失改善建議與處置要求（處置判定：【{demerit_status}】）")
+    r_h4 = h4.add_run(f"三、 督導缺失事項與處置要求（處置判定：【{demerit_status}】）")
     r_h4.font.name = "微軟正黑體"
     r_h4.font.size = Pt(13)
     r_h4.font.bold = True
     r_h4.font.color.rgb = RGBColor(15, 23, 42)
 
-    p_def = doc.add_paragraph(deficiencies if deficiencies else "本次查核無重大缺失事項。")
-    for r in p_def.runs:
-        r.font.name = "微軟正黑體"
-        r.font.size = Pt(10.5)
+    if defect_items or (deficiencies and deficiencies.strip()) or demerit_status in ["劣蹟註記", "請主管立即改善"]:
+        if defect_items:
+            for di in defect_items:
+                p_d = doc.add_paragraph(di)
+                for r in p_d.runs:
+                    r.font.name = "微軟正黑體"
+                    r.font.size = Pt(10)
+        else:
+            p_d = doc.add_paragraph("現場查有待改善事項，列管督導。")
+            for r in p_d.runs:
+                r.font.name = "微軟正黑體"
+                r.font.size = Pt(10)
+
+        if deficiencies and deficiencies.strip():
+            p_def_sup = doc.add_paragraph(f"【改善要求】：{deficiencies.strip()}")
+            for r in p_def_sup.runs:
+                r.font.name = "微軟正黑體"
+                r.font.size = Pt(10)
+
+        p_demerit_concl = doc.add_paragraph(f"⚠️ 處置要求：現場查核缺失事項列管追蹤，{demerit_phrase}。")
+        for r in p_demerit_concl.runs:
+            r.font.name = "微軟正黑體"
+            r.font.size = Pt(10.5)
+            r.font.bold = True
+            r.font.color.rgb = RGBColor(185, 28, 28)
+    else:
+        p_def = doc.add_paragraph("經現場各項重點查核，本次督勤無重大缺失事項。")
+        for r in p_def.runs:
+            r.font.name = "微軟正黑體"
+            r.font.size = Pt(10)
 
     doc.add_paragraph()
 

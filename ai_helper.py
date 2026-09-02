@@ -1,6 +1,6 @@
 """
 民力科業務執行與督勤彙整看板系統 - AI 智能模組 (Gemini Vision OCR & 文本生成)
-全面支援 Google Gemini API (Header x-goog-api-key 認證與 gemini-flash-lite-latest / flash-latest 雙引擎)
+具備高相容性手機影像壓縮、自動重試與 Google Gemini API (gemini-flash-lite / flash) 雙引擎
 """
 import os
 import json
@@ -15,7 +15,7 @@ from PIL import Image
 import io
 
 import streamlit as st
-from config import BASE_DIR
+from config import BASE_DIR, DEFAULT_GEMINI_KEY
 
 KEY_FILE_PATH = BASE_DIR / "gemini_key.txt"
 ENV_FILE_PATH = BASE_DIR / ".env"
@@ -23,7 +23,7 @@ ENV_FILE_PATH = BASE_DIR / ".env"
 CANDIDATE_MODELS = [
     "gemini-flash-lite-latest",
     "gemini-flash-latest",
-    "gemini-pro-latest",
+    "gemini-2.5-flash",
     "gemini-2.0-flash",
     "gemini-1.5-flash"
 ]
@@ -39,8 +39,8 @@ def save_gemini_api_key(api_key: str):
     except Exception:
         pass
 
-def get_gemini_api_key() -> Optional[str]:
-    """取得 Gemini API Key"""
+def get_gemini_api_key() -> str:
+    """取得 Gemini API Key (包含預設內建金鑰，確保雲端手機免設定直接可用)"""
     if "gemini_api_key" in st.session_state and st.session_state["gemini_api_key"]:
         return st.session_state["gemini_api_key"].strip()
     
@@ -74,7 +74,51 @@ def get_gemini_api_key() -> Optional[str]:
     except Exception:
         pass
     
-    return None
+    return DEFAULT_GEMINI_KEY
+
+
+def optimize_image_for_ocr(image_input) -> Optional[bytes]:
+    """
+    將使用者上傳或拍照的圖片（支援 HEIC / PNG / JPEG / WEBP）進行智慧色彩轉換、等比例縮放與壓縮
+    限制於 1280px 以內 (<250KB)，避免超出 Base64 API Payload 限制並大幅提升辨識速度
+    """
+    try:
+        if isinstance(image_input, bytes):
+            pil_img = Image.open(io.BytesIO(image_input))
+        elif hasattr(image_input, "read"):
+            if hasattr(image_input, "seek"):
+                image_input.seek(0)
+            img_bytes = image_input.read()
+            if hasattr(image_input, "seek"):
+                image_input.seek(0)
+            pil_img = Image.open(io.BytesIO(img_bytes))
+        elif isinstance(image_input, Image.Image):
+            pil_img = image_input
+        else:
+            return None
+
+        # 轉換色彩模式為 RGB (避免 PNG 透明度或 CMYK 報錯)
+        if pil_img.mode in ("RGBA", "P", "LA", "CMYK"):
+            pil_img = pil_img.convert("RGB")
+
+        # 等比例縮放至長邊最大 1280px
+        max_dim = 1280
+        w, h = pil_img.size
+        if max(w, h) > max_dim:
+            if w > h:
+                new_w = max_dim
+                new_h = int(h * (max_dim / w))
+            else:
+                new_h = max_dim
+                new_w = int(w * (max_dim / h))
+            pil_img = pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+        buf = io.BytesIO()
+        pil_img.save(buf, format="JPEG", quality=85, optimize=True)
+        return buf.getvalue()
+    except Exception as e:
+        print(f"Error optimizing image: {e}")
+        return None
 
 
 def call_gemini_rest(
@@ -181,15 +225,11 @@ def extract_event_from_image(image_input, api_key: Optional[str] = None) -> Dict
     """
     key = api_key or get_gemini_api_key()
     
-    img_bytes = None
-    if isinstance(image_input, bytes):
-        img_bytes = image_input
-    elif hasattr(image_input, "read"):
-        img_bytes = image_input.read()
-    elif isinstance(image_input, Image.Image):
-        buf = io.BytesIO()
-        image_input.save(buf, format="JPEG")
-        img_bytes = buf.getvalue()
+    # 進行影像優化縮放
+    img_bytes = optimize_image_for_ocr(image_input)
+    if not img_bytes:
+        st.error("❌ 圖片讀取失敗，請確認檔案格式是否正確。")
+        return {}
         
     prompt = """
 你是一位專業精準的消防局與民力科公務秘書。請仔細閱讀並分析所提供的開會通知單、公文、邀請卡或公祭訃聞圖片。
@@ -212,30 +252,25 @@ def extract_event_from_image(image_input, api_key: Optional[str] = None) -> Dict
 }
 """
 
-    if not key:
-        st.error("⚠️ 尚未配置 Gemini API Key！請先至【模組五：系統設定】貼上 Google Gemini 金鑰。")
+    try:
+        resp_text = call_gemini_rest(prompt=prompt, image_bytes=img_bytes, api_key=key)
+        if resp_text:
+            cleaned_text = resp_text.strip()
+            if "```json" in cleaned_text:
+                cleaned_text = cleaned_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in cleaned_text:
+                cleaned_text = cleaned_text.split("```")[1].split("```")[0].strip()
+            
+            json_match = re.search(r'\{.*\}', cleaned_text, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group(0))
+                if "title" in result and "event_date" in result:
+                    return result
+    except Exception as e:
+        st.error(f"❌ Gemini Vision 辨識失敗 ({str(e)})")
         return {}
 
-    if img_bytes:
-        try:
-            resp_text = call_gemini_rest(prompt=prompt, image_bytes=img_bytes, api_key=key)
-            if resp_text:
-                cleaned_text = resp_text.strip()
-                if "```json" in cleaned_text:
-                    cleaned_text = cleaned_text.split("```json")[1].split("```")[0].strip()
-                elif "```" in cleaned_text:
-                    cleaned_text = cleaned_text.split("```")[1].split("```")[0].strip()
-                
-                json_match = re.search(r'\{.*\}', cleaned_text, re.DOTALL)
-                if json_match:
-                    result = json.loads(json_match.group(0))
-                    if "title" in result and "event_date" in result:
-                        return result
-        except Exception as e:
-            st.error(f"❌ Gemini Vision 辨識失敗 ({str(e)})，請確認 API Key 額度或網路連線。")
-            return {}
-
-    st.error("❌ 無法完成圖片辨識，請確認上傳之圖片清晰度。")
+    st.error("❌ 無法完成圖片辨識，請確認網路連線與金鑰狀態。")
     return {}
 
 
@@ -246,10 +281,6 @@ def extract_event_from_text(text_input: str, api_key: Optional[str] = None) -> D
     key = api_key or get_gemini_api_key()
     today = date.today()
     today_str = today.strftime("%Y-%m-%d")
-
-    if not key:
-        st.error("⚠️ 尚未配置 Gemini API Key！請先至【模組五：系統設定】配置金鑰。")
-        return {}
 
     prompt = f"""
 你是一位專業的消防局與民力科公務秘書。請仔細閱讀並分析以下使用者貼上的公務通知、會議訊息、邀請或公祭訃聞文字。
@@ -298,10 +329,6 @@ def extract_doc_followup_from_text(doc_text: str, api_key: Optional[str] = None)
     key = api_key or get_gemini_api_key()
     today = date.today()
     today_str = today.strftime("%Y-%m-%d")
-
-    if not key:
-        st.error("⚠️ 尚未配置 Gemini API Key！請先至【模組五：系統設定】配置金鑰。")
-        return {}
 
     prompt = f"""
 你是一位資深的政府機關秘書與民力業務專案專家。請仔細閱讀並分析以下使用者貼上的「重要計畫內容 / 專案實施要點 / 公文簽呈 / 函文段落」。
@@ -356,20 +383,10 @@ def extract_doc_followup_from_image(image_input, api_key: Optional[str] = None) 
     使用 Gemini Vision 解析公文截圖或掃描檔
     """
     key = api_key or get_gemini_api_key()
-    
-    if not key:
-        st.error("⚠️ 尚未配置 Gemini API Key！請先至【模組五：系統設定】配置金鑰。")
+    img_bytes = optimize_image_for_ocr(image_input)
+    if not img_bytes:
+        st.error("❌ 圖片讀取失敗，請確認檔案格式。")
         return {}
-
-    img_bytes = None
-    if isinstance(image_input, bytes):
-        img_bytes = image_input
-    elif hasattr(image_input, "read"):
-        img_bytes = image_input.read()
-    elif isinstance(image_input, Image.Image):
-        buf = io.BytesIO()
-        image_input.save(buf, format="JPEG")
-        img_bytes = buf.getvalue()
 
     today = date.today()
     today_str = today.strftime("%Y-%m-%d")
@@ -396,23 +413,22 @@ def extract_doc_followup_from_image(image_input, api_key: Optional[str] = None) 
 }}
 """
 
-    if img_bytes:
-        try:
-            resp_text = call_gemini_rest(prompt=prompt, image_bytes=img_bytes, api_key=key)
-            if resp_text:
-                cleaned = resp_text.strip()
-                if "```json" in cleaned:
-                    cleaned = cleaned.split("```json")[1].split("```")[0].strip()
-                elif "```" in cleaned:
-                    cleaned = cleaned.split("```")[1].split("```")[0].strip()
-                json_match = re.search(r'\{.*\}', cleaned, re.DOTALL)
-                if json_match:
-                    res = json.loads(json_match.group(0))
-                    if "subject" in res and "deadline" in res:
-                        return res
-        except Exception as e:
-            st.error(f"❌ 辨識失敗：{str(e)}")
-            return {}
+    try:
+        resp_text = call_gemini_rest(prompt=prompt, image_bytes=img_bytes, api_key=key)
+        if resp_text:
+            cleaned = resp_text.strip()
+            if "```json" in cleaned:
+                cleaned = cleaned.split("```json")[1].split("```")[0].strip()
+            elif "```" in cleaned:
+                cleaned = cleaned.split("```")[1].split("```")[0].strip()
+            json_match = re.search(r'\{.*\}', cleaned, re.DOTALL)
+            if json_match:
+                res = json.loads(json_match.group(0))
+                if "subject" in res and "deadline" in res:
+                    return res
+    except Exception as e:
+        st.error(f"❌ 辨識失敗：{str(e)}")
+        return {}
 
     return {}
 

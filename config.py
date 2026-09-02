@@ -21,6 +21,7 @@ APP_TITLE = "民力科重要計畫及公文續辦管理看板系統"
 APP_SUBTITLE = "Civil Force Projects, Operations & Inspection Dashboard"
 APP_ICON = "🚒"
 APP_VERSION = "v2.2.0"
+DEFAULT_GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 # 使用者身分角色
 USER_ROLES = ["科長 / 決策主管", "督勤同仁 / 查核幹部", "業務承辦人 / 科員", "系統管理員"]
@@ -158,3 +159,72 @@ DEFAULT_SPEECH_TEMPLATES = [
         "history_examples": "【提升救災量能！民間企業熱心捐贈百萬救災裝備 守護市民安全】本局於今日舉行捐贈典禮..."
     }
 ]
+
+# 督導各重點項目之「現場狀況說明快捷選單」預設常用詞庫
+PRESET_NOTES_FILE = BASE_DIR / "inspection_preset_notes.json"
+
+DEFAULT_ITEM_PRESET_NOTES = {
+    "義消專長資料庫": [
+        "分隊已將專長資料庫網址設為瀏覽器書籤，落實定期更新。",
+        "承辦人已設定專用書籤，本月已完成新增2名具救護專長義消基本資料。",
+        "已設定專用書籤，資料庫定期維護維護良好。",
+        "分隊電腦尚未設定書籤，且未即時更新新進義消專長資料，已現場協助設定並請於3日內補正。",
+        "查核良好，運作正常。"
+    ],
+    "定期訓練及出勤紀錄": [
+        "抽查8月份常訓簽到名冊25名全員核實簽到，APP出勤時數與協勤紀錄相符。",
+        "常年訓練名冊簽核確實，出勤時數登錄無誤。",
+        "本月定期訓練出席率達95%，簽到退紀錄完整核實。",
+        "部分同仁APP出勤時數未即時登錄，已現場督導承辦人提醒補登。",
+        "查核良好，運作正常。"
+    ],
+    "議員建議補助款": [
+        "承辦同仁熟悉議員補助款請領程序、核銷單據黏貼與器材保管標籤規範。",
+        "補助款請領單據核銷完備，器材保管標籤齊全，查核良好。",
+        "分隊承辦人員熟悉相關作業規定，依期程辦理核銷申報。",
+        "單據黏貼與器材標籤未齊全，已現場輔導補正。",
+        "查核良好，運作正常。"
+    ],
+    "訓練安全管理程序書": [
+        "訓練安全檢核表落實填報，教官助教比符合規範，現場設有專責安全官管制。",
+        "辦理常訓及演練落實訓練安全管理程序書，裝備檢測良好無缺失。",
+        "依程序書落實各項安全檢核，安全官全程在場管制督導。",
+        "現場安全官未確實佩掛識別標示，已現場提醒改善。",
+        "查核良好，運作正常。"
+    ],
+    "義消制度": [
+        "幹部與同仁均清楚了解今年度義消福利保險升級、出勤津貼核發與新式考核制度。",
+        "現場向分隊同仁宣導本年度義消新制度，現場同仁均充分理解並落實推動。",
+        "同仁均了解本局推動之各項義消新制與津貼福利政策。",
+        "同仁對新式考核制度尚有疑義，已現場詳細說明釋疑。",
+        "查核良好，運作正常。"
+    ]
+}
+
+import json
+
+def load_preset_notes() -> dict:
+    """讀取各督導項目之狀況說明常用詞庫 (優先從本地 JSON，若無則載入預設)"""
+    if PRESET_NOTES_FILE.exists():
+        try:
+            with open(PRESET_NOTES_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    # 確保預設 5 項鍵都存在
+                    for k, v in DEFAULT_ITEM_PRESET_NOTES.items():
+                        if k not in data or not data[k]:
+                            data[k] = v
+                    return data
+        except Exception:
+            pass
+    return {k: list(v) for k, v in DEFAULT_ITEM_PRESET_NOTES.items()}
+
+def save_preset_notes(notes_dict: dict) -> bool:
+    """儲存使用者自訂之狀況說明詞庫至本地 JSON 檔案"""
+    try:
+        with open(PRESET_NOTES_FILE, "w", encoding="utf-8") as f:
+            json.dump(notes_dict, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        print(f"Error saving preset notes: {e}")
+        return False

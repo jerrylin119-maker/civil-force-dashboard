@@ -9,8 +9,12 @@ from datetime import datetime, date, timedelta
 from pathlib import Path
 
 from database import get_db, FireUnit, Inspection, InspectionFocusItem
-from config import REPORTS_DIR
-from export_helper import generate_inspection_docx
+from config import REPORTS_DIR, load_preset_notes, save_preset_notes
+from export_helper import (
+    generate_inspection_docx,
+    synthesize_inspection_sentence,
+    synthesize_defect_sentence
+)
 
 # 預設常態與新業務督勤重點範本
 DEFAULT_PRESET_FOCUS_TEXT = (
@@ -304,32 +308,46 @@ def render_inspection_module():
                     "義消制度": "例：幹部與同仁均清楚了解今年度義消福利保險升級、出勤津貼核發與新式考核制度。"
                 }
 
+                preset_notes_dict = load_preset_notes()
                 checked_items = []
                 for it in active_focus_items:
                     it_idx = it["idx"]
                     it_name = it["name"]
                     it_cat = it.get("category", "常態督勤")
                     
-                    # 匹配精確範例文字
+                    # 匹配精確範例文字與狀況詞庫
                     matched_placeholder = "例：現場查核符合規定，運作正常。"
+                    matched_preset_list = ["查核良好，運作正常。", "現場符合常態業務管理規範。"]
                     for k, ph in ITEM_SPECIFIC_PLACEHOLDERS.items():
                         if k in it_name or k in it_cat:
                             matched_placeholder = ph
+                            if k in preset_notes_dict:
+                                matched_preset_list = preset_notes_dict[k]
                             break
                     
                     cat_tag = f"<span style='background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: bold;'>{it_cat}</span>"
                     st.markdown(f"**📌 重點 {it_idx}** {cat_tag} ：**{it_name}**", unsafe_allow_html=True)
                     
-                    c_res, c_note = st.columns([1.2, 2.5])
+                    c_res, c_note_sel, c_note_txt = st.columns([1.1, 1.3, 1.6])
                     with c_res:
                         res = st.selectbox(
                             "查核結果",
                             ["☑ 符合規範 / 良好", "☒ 待改善 / 需追蹤", "ℹ 宣導提醒 / 政策轉達", "➖ 不適用 / 本次未查"],
                             key=f"insp_res_{it_idx}"
                         )
-                    with c_note:
+                    with c_note_sel:
+                        preset_dropdown_opts = ["（請選擇或手動輸入）"] + matched_preset_list + ["✍️ 自行手動輸入..."]
+                        chosen_preset = st.selectbox(
+                            "⚡ 狀況快捷選項",
+                            preset_dropdown_opts,
+                            key=f"insp_sel_{it_idx}",
+                            help="點選快捷選項可自動帶入右方文字框"
+                        )
+                    with c_note_txt:
+                        default_val = chosen_preset if (chosen_preset not in ["（請選擇或手動輸入）", "✍️ 自行手動輸入..."]) else ""
                         note = st.text_input(
-                            "現場狀況說明 / 抽查數據",
+                            "現場狀況說明 / 數據 (可修改)",
+                            value=default_val,
                             placeholder=matched_placeholder,
                             key=f"insp_note_{it_idx}"
                         )
@@ -383,6 +401,62 @@ def render_inspection_module():
                     if not f_unit or not f_inspector:
                         st.error("請確認填寫受督單位與督勤同仁姓名！")
                     else:
+                        # 自動彙整督導所見良好事項與缺失事項 (未檢查者自動濾除，已檢查者轉換為通順公文語句)
+                        good_items = []
+                        defect_items = []
+                        for it in checked_items:
+                            res_val = it['result']
+                            if any(k in res_val for k in ["待改善", "需追蹤", "缺失", "不符", "☒"]):
+                                defect_sentence = synthesize_defect_sentence(it)
+                                if defect_sentence:
+                                    defect_items.append(f"{len(defect_items)+1}. {defect_sentence}")
+                            else:
+                                good_sentence = synthesize_inspection_sentence(it)
+                                if good_sentence:
+                                    good_items.append(f"{len(good_items)+1}. {good_sentence}")
+
+                        # 組合「二、 督導所見事項彙整」
+                        merit_summary_map = {
+                            "口頭嘉勉": "給予口頭嘉勉",
+                            "優績": "給予優績",
+                            "符合良好": "符合良好"
+                        }
+                        merit_phrase = merit_summary_map.get(clean_merit, f"給予{clean_merit}")
+                        
+                        sec2_parts = []
+                        if good_items:
+                            sec2_parts.extend(good_items)
+                        else:
+                            sec2_parts.append("現場各項常態業務查核運作良好。")
+                            
+                        if f_strengths and f_strengths.strip():
+                            sec2_parts.append(f"\n**【補充說明】**：\n{f_strengths.strip()}")
+                            
+                        sec2_parts.append(f"\n📌 **總結處置**：現場整體運作良好，**{merit_phrase}**。")
+                        sec2_md = "\n".join(sec2_parts)
+
+                        # 組合「三、 督導缺失事項與處置要求」
+                        demerit_summary_map = {
+                            "劣蹟註記": "給予劣蹟註記",
+                            "請主管立即改善": "請主管立即改善",
+                            "無重大缺失事項": "無重大缺失事項"
+                        }
+                        demerit_phrase = demerit_summary_map.get(clean_demerit, f"給予{clean_demerit}")
+
+                        sec3_parts = []
+                        if defect_items:
+                            sec3_parts.extend(defect_items)
+                        if f_deficiencies and f_deficiencies.strip():
+                            sec3_parts.append(f"\n**【改善要求】**：\n{f_deficiencies.strip()}")
+                            
+                        if sec3_parts or clean_demerit in ["劣蹟註記", "請主管立即改善"]:
+                            if not sec3_parts:
+                                sec3_parts.append("現場查有待改善事項，列管督導。")
+                            sec3_parts.append(f"\n⚠️ **處置要求**：現場查核缺失事項列管追蹤，**{demerit_phrase}**。")
+                            sec3_md = "\n".join(sec3_parts)
+                        else:
+                            sec3_md = "經現場各項重點查核，本次督勤無重大缺失事項。"
+
                         # 格式化完整督勤報告 Markdown 文本
                         report_md = f"""# 臺東縣消防局民力科 督勤與業務查核紀錄表
 
@@ -403,13 +477,13 @@ def render_inspection_module():
                         report_md += f"""
 ---
 
-### 二、 現場優良事蹟與獎勵處置（處置判定：【{clean_merit}】）
-{f_strengths if f_strengths else '現場運作良好，無特別註記。'}
+### 二、 督導所見事項彙整（處置判定：【{clean_merit}】）
+{sec2_md}
 
 ---
 
-### 三、 缺失改善建議與處置要求（處置判定：【{clean_demerit}】）
-{f_deficiencies if f_deficiencies else '本次查核無重大缺失事項。'}
+### 三、 督導缺失事項與處置要求（處置判定：【{clean_demerit}】）
+{sec3_md}
 
 ---
 *督勤同仁簽章：{f_inspector}　　受督單位主管簽章：___________　　科長核閱：___________*
@@ -445,7 +519,7 @@ def render_inspection_module():
                             report_text=report_md
                         )
                         
-                        file_base_name = f"臺東縣消防局督勤報告_{f_unit}_{f_date.strftime('%Y%m%d')}_{f_inspector}"
+                        file_base_name = f"臺東縣消防局督勤報告_{f_unit}_{f_date.strftime('%Y%m%d')}_{f_inspector}_{new_insp.id}"
                         docx_file_path = REPORTS_DIR / f"{file_base_name}.docx"
                         md_file_path = REPORTS_DIR / f"{file_base_name}.md"
 
@@ -640,6 +714,60 @@ def render_inspection_module():
                         if st.button("🗑️ 刪除", key=f"del_focus_{it.id}"):
                             db.delete(it)
                             db.commit()
+                            st.rerun()
+
+            st.markdown("---")
+            st.markdown("#### 📝 3. 自訂各督導項目的「現場狀況說明快捷選單詞庫」")
+            st.markdown(
+                """
+                <div style="background: #eff6ff; border-left: 4px solid #2563eb; padding: 10px 14px; border-radius: 6px; font-size: 0.9rem; color: #1e40af; margin-bottom: 1rem;">
+                    💡 <b>詞庫自訂說明</b>：您可以在此自由新增或修改每個重點項目的常用現場說明（每行代表一個下拉選單選項），儲存後現場督勤表單的下拉選單將<b>即時同步更新</b>！
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+            
+            curr_presets = load_preset_notes()
+            preset_keys = list(curr_presets.keys())
+            
+            p_c1, p_c2 = st.columns([1.2, 2.8])
+            with p_c1:
+                sel_preset_cat = st.selectbox("選擇要維護詞庫的重點項目：", preset_keys, key="edit_preset_cat_sel")
+                new_custom_cat = st.text_input("➕ 或新增自訂重點項目類別名稱：", placeholder="例：無人機科技巡檢", key="new_preset_cat_inp")
+                if st.button("➕ 新增該項目類別", use_container_width=True):
+                    if new_custom_cat.strip() and new_custom_cat.strip() not in curr_presets:
+                        curr_presets[new_custom_cat.strip()] = ["現場查核符合規範，運作良好。"]
+                        save_preset_notes(curr_presets)
+                        st.success(f"已新增【{new_custom_cat.strip()}】狀況詞庫！")
+                        st.rerun()
+
+            with p_c2:
+                target_cat = sel_preset_cat
+                existing_lines = "\n".join(curr_presets.get(target_cat, []))
+                edited_lines = st.text_area(
+                    f"【{target_cat}】常用狀況選項清單 (每行代表一個下拉選單選項)：",
+                    value=existing_lines,
+                    height=160,
+                    key=f"preset_lines_area_{target_cat}"
+                )
+                
+                col_btn_p1, col_btn_p2 = st.columns([1.2, 1])
+                with col_btn_p1:
+                    if st.button("💾 儲存並更新該項目狀況詞庫", type="primary", use_container_width=True, key="save_preset_notes_btn"):
+                        new_list = [line.strip() for line in edited_lines.split("\n") if line.strip()]
+                        if not new_list:
+                            new_list = ["查核良好，運作正常。"]
+                        curr_presets[target_cat] = new_list
+                        save_preset_notes(curr_presets)
+                        st.success(f"🎉 已成功更新【{target_cat}】現場狀況詞庫（共 {len(new_list)} 個選項）！現場督勤表單已即時同步！")
+                        st.rerun()
+                with col_btn_p2:
+                    if st.button("🔄 重置為預設公版詞庫", use_container_width=True, key="reset_preset_notes_btn"):
+                        from config import DEFAULT_ITEM_PRESET_NOTES
+                        if target_cat in DEFAULT_ITEM_PRESET_NOTES:
+                            curr_presets[target_cat] = list(DEFAULT_ITEM_PRESET_NOTES[target_cat])
+                            save_preset_notes(curr_presets)
+                            st.info(f"已重置【{target_cat}】為預設公版詞庫！")
                             st.rerun()
 
         # ==========================================

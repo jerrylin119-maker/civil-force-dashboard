@@ -106,6 +106,18 @@ def main():
         )
 
         st.markdown("---")
+        with st.expander("🚀 一鍵同步更新到 GitHub", expanded=False):
+            st.caption("在本地修改代碼或自訂詞庫後，點擊立即自動推送到 GitHub 雲端：")
+            if st.button("🚀 立即推送更新", use_container_width=True, key="sidebar_git_sync_btn"):
+                from git_sync_helper import run_git_sync
+                with st.spinner("同步推送中..."):
+                    ok_git, git_msg = run_git_sync()
+                    if ok_git:
+                        st.success("✅ 已成功同步至 GitHub！Streamlit 雲端已開始自動部署！")
+                        st.balloons()
+                    else:
+                        st.error(git_msg)
+
         st.markdown(
             """
             <div style="font-size: 0.75rem; color: #94a3b8; text-align: center;">
