@@ -25,33 +25,7 @@ DEFAULT_PRESET_FOCUS_TEXT = (
     "5. 詢問對於今年本局推動的義消制度是否了解"
 )
 
-PRESET_FOCUS_TEMPLATES = {
-    "常態民力督勤標準公版 (5大重點)": DEFAULT_PRESET_FOCUS_TEXT,
-    "【新業務】防災士培育與韌性社區推動督導": (
-        "1. 轄區各村里防災士培訓名冊與志工動員機制建立狀況\n"
-        "2. 韌性社區防救災組織運作、避難收容演練與台帳整備\n"
-        "3. 民力參與社區防災宣導與防救災物資清點維護\n"
-        "4. 新推動防災士回訓制度與政策宣導說明"
-    ),
-    "【新業務】無人機與科技救災器材維護專案": (
-        "1. 科技救災無人機 (UAV) 飛手合格證照與定期操作保養紀錄\n"
-        "2. 熱顯像儀 (TIC) 及救災圖資通訊平板充電與妥善率檢查\n"
-        "3. 救災現場空拍傳輸與指揮中心影像通聯測試\n"
-        "4. 科技裝備保管清冊與損耗維修通報機制"
-    ),
-    "演訓與常訓專案督導公版": (
-        "1. 義消常年訓練/幹部專業訓練出席率與簽到簽退確實性\n"
-        "2. 常訓實操演練安全防護規範與教官助教配置落實\n"
-        "3. 演練器材裝備檢測與現場操作安全管制\n"
-        "4. 新進義消人員訓練輔導與隊部傳承關懷"
-    ),
-    "裝備器材保養與防汛整備公版": (
-        "1. 救災器材、救生艇 (IRB) 及舷外機定期發動保養運作檢測\n"
-        "2. 空氣呼吸器 (SCBA) 氣瓶水壓檢驗期限與氣量檢查\n"
-        "3. 通訊器材、無線電電池充放電管理與備份通信測試\n"
-        "4. 分隊各項民力防救災裝備器材保管清冊校對"
-    )
-}
+
 
 def render_inspection_module():
     st.markdown(
@@ -604,84 +578,35 @@ def render_inspection_module():
                     )
 
         # ==========================================
-        # TAB 3: 督導重點項目庫管理 (因應新業務新增與擴充)
+        # TAB 3: 督導重點項目與狀況說明選項維護
         # ==========================================
         with tab_settings:
-            st.subheader("⚙️ 督導重點項目庫管理 (因應新業務擴充與維護)")
+            st.subheader("⚙️ 督導重點項目與現場狀況說明選項維護")
             st.markdown(
                 """
-                <div style="background: #f8fafc; border-left: 4px solid #64748b; padding: 10px 14px; border-radius: 6px; font-size: 0.9rem; color: #334155; margin-bottom: 1rem;">
-                    💡 <b>新業務擴充說明</b>：當科內有<b>新推動業務（例如防災士培訓、無人機科技救災、新修法規推展、專案演訓等）</b>時，可在本分頁：<br>
-                    1. <b>個別新增新業務項目</b>，或直接<b>載入新業務專案範本</b>。<br>
-                    2. 儲存後，現場督勤表單將<b>自動加入新業務督導項目</b>，同仁現場直接勾選查核！
+                <div style="background: #f8fafc; border-left: 4px solid #0284c7; padding: 10px 14px; border-radius: 6px; font-size: 0.9rem; color: #334155; margin-bottom: 1.2rem;">
+                    💡 <b>維護說明</b>：您可以在此直接編輯<b>督導重點項目清單</b>，以及自訂各重點項目的<b>現場狀況說明下拉選單選項</b>。儲存後現場填報表單將<b>即時同步更新</b>！
                 </div>
                 """,
                 unsafe_allow_html=True
             )
 
-            # ── 區塊 A：單項快速新增新業務項目 ──
-            st.markdown("#### ➕ 1. 快速新增個別新業務督導項目")
-            with st.form("add_single_focus_form"):
-                a_c1, a_c2, a_c3 = st.columns([1.2, 2.5, 1])
-                with a_c1:
-                    add_cat = st.selectbox("業務類別", ["新業務專案", "防災士與韌性社區", "科技救災與無人機", "演訓與常訓", "裝備與防汛", "法規與福利宣導", "其他"])
-                with a_c2:
-                    add_name = st.text_input("督導重點項目名稱 *", placeholder="例：無人機科技救災飛手證照與定期操作保養檢測")
-                with a_c3:
-                    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-                    btn_add_single = st.form_submit_button("➕ 加入重點項目庫", type="primary", use_container_width=True)
-
-                if btn_add_single:
-                    if not add_name.strip():
-                        st.error("請輸入項目名稱！")
-                    else:
-                        item_obj = InspectionFocusItem(
-                            category=add_cat,
-                            item_name=add_name.strip(),
-                            description="因應新業務新增",
-                            is_active=True
-                        )
-                        db.add(item_obj)
-                        db.commit()
-                        st.success(f"🎉 已成功新增【{add_cat}】{add_name.strip()}！現場督勤表單已即時同步！")
-                        st.rerun()
-
-            st.markdown("---")
-
-            # ── 區塊 B：新業務範本整批載入與文字框批量編輯 ──
-            st.markdown("#### 📋 2. 載入新業務公版範本或整批批量編輯")
+            # ── 區塊 1：督導重點項目清單整批維護 ──
+            st.markdown("#### 📌 1. 督導重點項目清單維護")
             
-            st.write("##### ⚡ 快速載入新業務與常態公版範本：")
-            c_s1, c_s2, c_s3, c_s4 = st.columns(4)
-            with c_s1:
-                if st.button("📋 載入【常態民力督勤】5大公版", use_container_width=True):
-                    st.session_state["settings_focus_text"] = PRESET_FOCUS_TEMPLATES["常態民力督勤標準公版 (5大重點)"]
-            with c_s2:
-                if st.button("🏘️ 載入【防災士與韌性社區】新業務", use_container_width=True):
-                    st.session_state["settings_focus_text"] = PRESET_FOCUS_TEMPLATES["【新業務】防災士培育與韌性社區推動督導"]
-            with c_s3:
-                if st.button("🚁 載入【科技無人機巡檢】新業務", use_container_width=True):
-                    st.session_state["settings_focus_text"] = PRESET_FOCUS_TEMPLATES["【新業務】無人機與科技救災器材維護專案"]
-            with c_s4:
-                if st.button("🚒 載入【演訓常訓專案】公版", use_container_width=True):
-                    st.session_state["settings_focus_text"] = PRESET_FOCUS_TEMPLATES["演訓與常訓專案督導公版"]
-
-            # 組合目前資料庫中的項目為文字
-            if "settings_focus_text" in st.session_state and st.session_state["settings_focus_text"]:
-                current_db_text = st.session_state["settings_focus_text"]
-            elif db_focus_items:
+            if db_focus_items:
                 current_db_text = "\n".join([f"{idx}. [{it.category}] {it.item_name}" for idx, it in enumerate(db_focus_items, 1)])
             else:
                 current_db_text = DEFAULT_PRESET_FOCUS_TEXT
 
             with st.form("save_focus_items_form"):
                 focus_text_input = st.text_area(
-                    "當前督勤重點清單整批編輯 (每行一項，儲存後現場填報將立即採用此清單)：",
+                    "當前督導重點清單 (每行一項，儲存後現場填報表單將立即採用此清單)：",
                     value=current_db_text,
-                    height=180
+                    height=160
                 )
 
-                if st.form_submit_button("💾 儲存並替換為當前科內預設督勤重點清單", type="primary", use_container_width=True):
+                if st.form_submit_button("💾 儲存並更新督導重點項目清單", type="primary", use_container_width=True):
                     lines = [l.strip() for l in focus_text_input.split("\n") if l.strip()]
                     if not lines:
                         st.error("請至少保留一項督勤重點！")
@@ -706,74 +631,80 @@ def render_inspection_module():
                             )
                             db.add(item_obj)
                         db.commit()
-                        st.session_state["settings_focus_text"] = None
-                        st.success("🎉 科內督勤重點清單已成功更新！現場填報表單已即時同步更新！")
+                        st.success("🎉 督導重點清單已成功更新！現場填報表單已即時同步！")
                         st.rerun()
 
-            st.markdown("##### 📌 當前資料庫中生效之重點清單：")
-            if db_focus_items:
-                for idx, it in enumerate(db_focus_items, 1):
-                    c_del1, c_del2 = st.columns([5, 1])
-                    with c_del1:
-                        st.markdown(f"- **第 {idx} 項** `[{it.category}]` **{it.item_name}**")
-                    with c_del2:
-                        if st.button("🗑️ 刪除", key=f"del_focus_{it.id}"):
-                            db.delete(it)
+            # ── 單筆快速新增區塊 ──
+            with st.expander("➕ 單筆快速新增個別督導重點項目", expanded=False):
+                with st.form("add_single_focus_form", clear_on_submit=True):
+                    a_c1, a_c2 = st.columns([1.2, 2.8])
+                    with a_c1:
+                        add_cat = st.selectbox("重點類別", ["義消專長資料庫", "訓練與出勤紀錄", "補助款規定熟悉度", "訓練安全管理", "義消推動制度了解", "常態督勤", "其他專案"])
+                    with a_c2:
+                        add_name = st.text_input("督導重點項目名稱 *", placeholder="例：抽查本月義消定期訓練及出勤紀錄是否核實")
+                    
+                    if st.form_submit_button("➕ 加入重點項目清單", type="primary", use_container_width=True):
+                        if not add_name.strip():
+                            st.error("請輸入項目名稱！")
+                        else:
+                            item_obj = InspectionFocusItem(
+                                category=add_cat,
+                                item_name=add_name.strip(),
+                                description="",
+                                is_active=True
+                            )
+                            db.add(item_obj)
                             db.commit()
+                            st.success(f"🎉 已成功新增【{add_cat}】{add_name.strip()}！")
                             st.rerun()
 
             st.markdown("---")
-            st.markdown("#### 📝 3. 自訂各督導項目的「現場狀況說明快捷選單詞庫」")
-            st.markdown(
-                """
-                <div style="background: #eff6ff; border-left: 4px solid #2563eb; padding: 10px 14px; border-radius: 6px; font-size: 0.9rem; color: #1e40af; margin-bottom: 1rem;">
-                    💡 <b>詞庫自訂說明</b>：您可以在此自由新增或修改每個重點項目的常用現場說明（每行代表一個下拉選單選項），儲存後現場督勤表單的下拉選單將<b>即時同步更新</b>！
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
+
+            # ── 區塊 2：各督導項目的現場狀況說明下拉選單選項維護 ──
+            st.markdown("#### 📝 2. 自訂各重點項目的「現場狀況說明下拉選單選項」")
+            st.caption("直接選擇重點項目，編輯其下拉選單中的常用狀況句子（每行代表一個下拉選單選項）：")
             
             curr_presets = load_preset_notes()
             preset_keys = list(curr_presets.keys())
             
             p_c1, p_c2 = st.columns([1.2, 2.8])
             with p_c1:
-                sel_preset_cat = st.selectbox("選擇要維護詞庫的重點項目：", preset_keys, key="edit_preset_cat_sel")
-                new_custom_cat = st.text_input("➕ 或新增自訂重點項目類別名稱：", placeholder="例：無人機科技巡檢", key="new_preset_cat_inp")
-                if st.button("➕ 新增該項目類別", use_container_width=True):
+                sel_preset_cat = st.selectbox("選擇要維護選項的重點項目：", preset_keys, key="edit_preset_cat_sel")
+                new_custom_cat = st.text_input("➕ 或新增重點項目類別名稱：", placeholder="例：新制宣導事項", key="new_preset_cat_inp")
+                if st.button("➕ 新增此類別選項庫", use_container_width=True):
                     if new_custom_cat.strip() and new_custom_cat.strip() not in curr_presets:
                         curr_presets[new_custom_cat.strip()] = ["現場查核符合規範，運作良好。"]
                         save_preset_notes(curr_presets)
-                        st.success(f"已新增【{new_custom_cat.strip()}】狀況詞庫！")
+                        st.success(f"已新增【{new_custom_cat.strip()}】狀況選項庫！")
                         st.rerun()
 
             with p_c2:
                 target_cat = sel_preset_cat
                 existing_lines = "\n".join(curr_presets.get(target_cat, []))
                 edited_lines = st.text_area(
-                    f"【{target_cat}】常用狀況選項清單 (每行代表一個下拉選單選項)：",
+                    f"【{target_cat}】下拉選單選項清單 (每行代表一個選項)：",
                     value=existing_lines,
-                    height=160,
+                    height=180,
                     key=f"preset_lines_area_{target_cat}"
                 )
                 
                 col_btn_p1, col_btn_p2 = st.columns([1.2, 1])
                 with col_btn_p1:
-                    if st.button("💾 儲存並更新該項目狀況詞庫", type="primary", use_container_width=True, key="save_preset_notes_btn"):
+                    if st.button("💾 儲存並更新此項目狀況選項", type="primary", use_container_width=True, key="save_preset_notes_btn"):
                         new_list = [line.strip() for line in edited_lines.split("\n") if line.strip()]
                         if not new_list:
                             new_list = ["查核良好，運作正常。"]
                         curr_presets[target_cat] = new_list
                         save_preset_notes(curr_presets)
-                        st.success(f"🎉 已成功更新【{target_cat}】現場狀況詞庫（共 {len(new_list)} 個選項）！現場督勤表單已即時同步！")
+                        st.success(f"🎉 已成功更新【{target_cat}】下拉選單選項（共 {len(new_list)} 項）！現場填報表單已即時同步！")
                         st.rerun()
                 with col_btn_p2:
-                    if st.button("🔄 重置為預設公版詞庫", use_container_width=True, key="reset_preset_notes_btn"):
+                    if st.button("🔄 重置為預設公版選項", use_container_width=True, key="reset_preset_notes_btn"):
                         from config import DEFAULT_ITEM_PRESET_NOTES
                         if target_cat in DEFAULT_ITEM_PRESET_NOTES:
                             curr_presets[target_cat] = list(DEFAULT_ITEM_PRESET_NOTES[target_cat])
                             save_preset_notes(curr_presets)
-                            st.info(f"已重置【{target_cat}】為預設公版詞庫！")
+                            st.info(f"已重置【{target_cat}】為預設公版選項！")
                             st.rerun()
 
         # ==========================================
