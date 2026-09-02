@@ -309,6 +309,8 @@ def render_inspection_module():
                 }
 
                 preset_notes_dict = load_preset_notes()
+                st.info("💡 **填報說明**：各重點項目之「狀況說明」可**直接點選下拉選單快速套用**，亦可**直接在下方自訂欄位打字**（有打字則優先採用自訂內容）。若需新增或修改下拉選項，請至上方 **「⚙️ 督導重點項目庫管理」** 維護。")
+
                 checked_items = []
                 for it in active_focus_items:
                     it_idx = it["idx"]
@@ -328,36 +330,40 @@ def render_inspection_module():
                     cat_tag = f"<span style='background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: bold;'>{it_cat}</span>"
                     st.markdown(f"**📌 重點 {it_idx}** {cat_tag} ：**{it_name}**", unsafe_allow_html=True)
                     
-                    c_res, c_note_sel, c_note_txt = st.columns([1.1, 1.3, 1.6])
+                    c_res, c_note = st.columns([1, 2.5])
                     with c_res:
                         res = st.selectbox(
                             "查核結果",
                             ["☑ 符合規範 / 良好", "☒ 待改善 / 需追蹤", "ℹ 宣導提醒 / 政策轉達", "➖ 不適用 / 本次未查"],
                             key=f"insp_res_{it_idx}"
                         )
-                    with c_note_sel:
-                        preset_dropdown_opts = ["（請選擇或手動輸入）"] + matched_preset_list + ["✍️ 自行手動輸入..."]
+                    with c_note:
+                        preset_dropdown_opts = matched_preset_list + ["✍️ 自行手動輸入 (請在下方欄位打字)..."]
                         chosen_preset = st.selectbox(
-                            "⚡ 狀況快捷選項",
+                            "⚡ 現場狀況快捷選單 (點選即採用此範本)",
                             preset_dropdown_opts,
-                            key=f"insp_sel_{it_idx}",
-                            help="點選快捷選項可自動帶入右方文字框"
+                            key=f"insp_sel_{it_idx}"
                         )
-                    with c_note_txt:
-                        default_val = chosen_preset if (chosen_preset not in ["（請選擇或手動輸入）", "✍️ 自行手動輸入..."]) else ""
-                        note = st.text_input(
-                            "現場狀況說明 / 數據 (可修改)",
-                            value=default_val,
+                        custom_input = st.text_input(
+                            "📝 自訂狀況說明 / 數據 (若選上方選項可留空；若在此輸入則優先以此內容為準)",
                             placeholder=matched_placeholder,
-                            key=f"insp_note_{it_idx}"
+                            key=f"insp_custom_{it_idx}"
                         )
-                    
+
+                    # 決定最終採用的 note 文字：若有自訂輸入則用自訂輸入，否則採用下拉選單文字
+                    if custom_input and custom_input.strip():
+                        final_note = custom_input.strip()
+                    elif "自行手動輸入" not in chosen_preset:
+                        final_note = chosen_preset
+                    else:
+                        final_note = "查核良好"
+
                     clean_res = res.split(" / ")[0]
                     checked_items.append({
                         "category": it_cat,
                         "name": it_name,
                         "result": clean_res,
-                        "note": note if note else "查核良好"
+                        "note": final_note
                     })
                     st.markdown("<div style='border-bottom: 1px dashed #cbd5e1; margin: 6px 0 10px 0;'></div>", unsafe_allow_html=True)
 
