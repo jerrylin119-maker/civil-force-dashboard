@@ -8,7 +8,7 @@ import pandas as pd
 from datetime import datetime, date, timedelta
 from pathlib import Path
 
-from database import get_db, FireUnit, Inspection, InspectionFocusItem
+from database import get_db, FireUnit, Inspection, InspectionFocusItem, CalendarEvent
 from config import REPORTS_DIR, load_preset_notes, save_preset_notes
 from export_helper import (
     generate_inspection_docx,
@@ -32,7 +32,7 @@ def render_inspection_module():
         """
         <div class="main-header">
             <h1>🛡️ 模組三：督勤管理與報告產出機</h1>
-            <p>臺東縣四大隊分隊半年督導覆蓋率 ➔ 預先產出督勤重點 ➔ 現場勾選評估 ➔ 總結【優績/口頭嘉勉】與【劣蹟註記/請主管立即改善】處置</p>
+            <p>督導期程預排 ➔ 預定查核重點 ➔ 現場實際狀況填報 ➔ 總結【優績/口頭嘉勉】與【劣蹟註記/請主管立即改善】處置 ➔ 一鍵產出公務 Word 報告</p>
         </div>
         """,
         unsafe_allow_html=True
@@ -45,10 +45,22 @@ def render_inspection_module():
 
         # 讀取轄內所有消防大隊與分隊
         units = db.query(FireUnit).all()
-        all_inspections = db.query(Inspection).order_by(Inspection.inspect_date.desc()).all()
+        all_inspections = db.query(Inspection).filter(Inspection.status != "預排中").order_by(Inspection.inspect_date.desc()).all()
+        pending_plans = db.query(Inspection).filter(Inspection.status == "預排中").order_by(Inspection.inspect_date.asc()).all()
         
         # 讀取預先設定的重點項目庫
         db_focus_items = db.query(InspectionFocusItem).filter(InspectionFocusItem.is_active == True).all()
+
+        # 活躍重點項目快取
+        active_focus_items = []
+        if db_focus_items:
+            for idx, it in enumerate(db_focus_items, 1):
+                active_focus_items.append({"idx": idx, "id": it.id, "name": it.item_name, "category": it.category})
+        else:
+            raw_lines = [line.strip() for line in DEFAULT_PRESET_FOCUS_TEXT.split("\n") if line.strip()]
+            for idx, line in enumerate(raw_lines, 1):
+                clean_name = line.lstrip("0123456789.、: -")
+                active_focus_items.append({"idx": idx, "id": idx, "name": clean_name if clean_name else line, "category": "常態督勤"})
 
         # 計算統計指標
         unit_stats = []
@@ -87,191 +99,280 @@ def render_inspection_module():
         low_count = len([us for us in unit_stats if us["status_level"] == "low"])
         coverage_rate = int(((total_units - low_count) / total_units * 100)) if total_units > 0 else 0
 
-        # 功能分頁
-        tab_coverage, tab_record, tab_settings, tab_history = st.tabs([
-            "🗺️ 臺東四大隊分隊半年督勤覆蓋率全覽",
-            "📝 現場督勤填報與處置結論產出",
-            "⚙️ 督導重點項目庫管理 (含新業務擴充)",
-            "📁 歷史督勤檔案庫 (實體報告查詢)"
+        # 功能分頁 (依兩階段督導流程安排)
+        tab_schedule, tab_record, tab_coverage, tab_history, tab_settings = st.tabs([
+            "📅 督導期程預排與重點規劃",
+            "📝 現場督勤填報與報告產出",
+            "🗺️ 臺東四大隊半年督勤覆蓋率",
+            "📁 歷史督勤檔案庫 (實體報告)",
+            "⚙️ 督導重點項目與選項維護"
         ])
 
         # ==========================================
-        # TAB 1: 半年督導覆蓋率看板 (無任何優先排序)
+        # TAB 1: 督導期程預排與重點規劃 (階段一)
         # ==========================================
-        with tab_coverage:
-            st.subheader("🗺️ 臺東縣消防局轄區半年督勤覆蓋率全景")
-            
-            # KPI 指標卡片
-            c_kpi1, c_kpi2, c_kpi3, c_kpi4 = st.columns(4)
-            with c_kpi1:
-                st.markdown(
-                    f"""
-                    <div class="kpi-card">
-                        <div class="kpi-title">總受督消防單位數</div>
-                        <div class="kpi-value" style="color: #1e293b;">{total_units} <span style="font-size: 1rem;">所</span></div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-            with c_kpi2:
-                rate_color = "#10b981" if coverage_rate >= 80 else "#f59e0b"
-                st.markdown(
-                    f"""
-                    <div class="kpi-card" style="border-top: 3px solid {rate_color};">
-                        <div class="kpi-title">半年督勤覆蓋率</div>
-                        <div class="kpi-value" style="color: {rate_color};">{coverage_rate}%</div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-            with c_kpi3:
-                st.markdown(
-                    f"""
-                    <div class="kpi-card" style="border-top: 3px solid #ef4444;">
-                        <div class="kpi-title" style="color: #b91c1c;">🔴 半年內 0 次</div>
-                        <div class="kpi-value" style="color: #dc2626;">{low_count} <span style="font-size: 1rem;">所</span></div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-            with c_kpi4:
-                st.markdown(
-                    f"""
-                    <div class="kpi-card" style="border-top: 3px solid #10b981;">
-                        <div class="kpi-title" style="color: #15803d;">🟢 覆蓋良好 (&gt;=2次)</div>
-                        <div class="kpi-value" style="color: #16a34a;">{high_count} <span style="font-size: 1rem;">所</span></div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-
-            st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
-
-            # 轄區單位色彩全覽網格
-            st.markdown("### 🏢 臺東縣消防局轄區各大隊分隊督導覆蓋狀態")
-            
-            group_by_mode = st.radio("分組顯示方式", ["🏢 依四大隊及專屬分隊分組 (臺東、關山、成功、大武、局本部專屬任務隊)", "🏷️ 依單位類別分組 (消防大隊、消防分隊、專屬分隊)"], horizontal=True)
-
-            if "四大隊" in group_by_mode:
-                districts_order = [
-                    "臺東大隊轄區",
-                    "臺東大隊(離島)",
-                    "關山大隊轄區",
-                    "成功大隊轄區",
-                    "大武大隊轄區",
-                    "局本部專屬任務隊"
-                ]
-                existing_districts = list(set([u.district for u in units if u.district]))
-                ordered_districts = [d for d in districts_order if d in existing_districts] + [d for d in existing_districts if d not in districts_order]
-                
-                for dist in ordered_districts:
-                    st.write(f"##### 📍 {dist}")
-                    dist_units = [us for us in unit_stats if us["district"] == dist]
-                    
-                    cols = st.columns(4)
-                    for idx, u_stat in enumerate(dist_units):
-                        c = cols[idx % 4]
-                        with c:
-                            days_txt = f"上次：{u_stat['days_since_last']} 天前" if u_stat['days_since_last'] < 900 else "尚未有紀錄"
-                            css_class = f"coverage-{u_stat['status_level']}"
-                            st.markdown(
-                                f"""
-                                <div class="coverage-unit-card {css_class}">
-                                    <div style="font-weight: 700; font-size: 0.95rem;">{u_stat['name']}</div>
-                                    <div style="font-size: 0.8rem; margin-top: 4px;">{u_stat['status_text']}</div>
-                                    <div style="font-size: 0.75rem; opacity: 0.85; margin-top: 2px;">{days_txt}</div>
-                                </div>
-                                """,
-                                unsafe_allow_html=True
-                            )
-            else:
-                categories = sorted(list(set([u.unit_type for u in units])))
-                for cat in categories:
-                    st.write(f"##### 🏢 {cat}")
-                    cat_units = [us for us in unit_stats if us["type"] == cat]
-                    
-                    cols = st.columns(4)
-                    for idx, u_stat in enumerate(cat_units):
-                        c = cols[idx % 4]
-                        with c:
-                            days_txt = f"上次：{u_stat['days_since_last']} 天前" if u_stat['days_since_last'] < 900 else "尚未有紀錄"
-                            css_class = f"coverage-{u_stat['status_level']}"
-                            st.markdown(
-                                f"""
-                                <div class="coverage-unit-card {css_class}">
-                                    <div style="font-weight: 700; font-size: 0.95rem;">{u_stat['name']}</div>
-                                    <div style="font-size: 0.8rem; margin-top: 4px;">{u_stat['status_text']}</div>
-                                    <div style="font-size: 0.75rem; opacity: 0.85; margin-top: 2px;">{days_txt}</div>
-                                </div>
-                                """,
-                                unsafe_allow_html=True
-                            )
-
-        # ==========================================
-        # TAB 2: 現場督勤填報與處置結論產出
-        # ==========================================
-        with tab_record:
-            st.subheader("📝 現場督勤查核填報與處置結論產出")
-            
+        with tab_schedule:
+            st.subheader("📅 督導期程預排與查核重點規劃")
             st.markdown(
                 """
-                <div style="background: #eff6ff; border-left: 4px solid #3b82f6; padding: 10px 14px; border-radius: 6px; font-size: 0.9rem; color: #1e3a8a; margin-bottom: 1rem;">
-                    💡 <b>督勤考核處置機制</b>：<br>
-                    • <b>無須打分數</b>，依現場查核實況判定：<br>
-                    &nbsp;&nbsp;🌟 <b>整體優良處置</b>：判定為<b>「優績」</b>（提報獎勵）或<b>「口頭嘉勉」</b>。<br>
-                    &nbsp;&nbsp;⚠️ <b>缺失改善處置</b>：判定為<b>「劣蹟註記」</b>或<b>「請主管立即改善」</b>（或無重大缺失）。<br>
-                    • 點擊<b>「🚀 一鍵生成公務督勤報告」</b>，系統自動排版生成標準公務 Word (.docx) 檔並永久存檔！
+                <div style="background: #f0f9ff; border-left: 4px solid #0284c7; padding: 12px 16px; border-radius: 6px; font-size: 0.9rem; color: #0369a1; margin-bottom: 1.2rem;">
+                    💡 <b>督導兩階段作業機制</b>：<br>
+                    1. <b>【階段一：行前預排】</b>：在此預先填寫<b>受督單位、預定督勤日期、督勤人員</b>，並<b>預先勾選當日預計抽查的重點項目</b>（亦可填寫行前注意事項，並同步至公務行事曆）。<br>
+                    2. <b>【階段二：當日填報】</b>：督導當日，直接在下方清單點擊「<b>🚀 前往現場督勤填報</b>」，系統將<b>自動帶入全部預排資料與預定重點</b>，現場只要就實際狀況勾選結果與填寫說明即可產出報告！
                 </div>
                 """,
                 unsafe_allow_html=True
             )
 
-            # 取得當前預先產出之重點項目清單
-            active_focus_items = []
-            if db_focus_items:
-                for idx, it in enumerate(db_focus_items, 1):
-                    active_focus_items.append({"idx": idx, "name": it.item_name, "category": it.category})
+            # ── 區塊 1：建立新督導預排期程 ──
+            with st.container(border=True):
+                st.markdown("#### ➕ 建立新督導預排期程")
+                with st.form("add_plan_schedule_form", clear_on_submit=True):
+                    p_col1, p_col2, p_col3 = st.columns(3)
+                    with p_col1:
+                        unit_options = [u.unit_name for u in units]
+                        plan_unit = st.selectbox("受督導單位 *", unit_options, key="sched_plan_unit")
+                    with p_col2:
+                        plan_date = st.date_input("預定督勤日期 *", value=today + timedelta(days=2), key="sched_plan_date")
+                    with p_col3:
+                        current_user = st.session_state.get("user")
+                        default_inspector = current_user.get("display_name", "民力科同仁") if current_user else "民力科同仁"
+                        plan_inspector = st.text_input("預定督勤同仁姓名 *", value=default_inspector, key="sched_plan_insp")
+
+                    st.markdown("##### 🔍 預定當日查核重點項目勾選 (請挑選當天預計抽查之項目)：")
+                    
+                    chosen_plan_items = []
+                    chk_cols = st.columns(2)
+                    for idx_f, f_it in enumerate(active_focus_items):
+                        target_col = chk_cols[idx_f % 2]
+                        with target_col:
+                            is_chk = st.checkbox(
+                                f"**重點 {idx_f+1}** `[{f_it.get('category', '常態督勤')}]`：{f_it['name']}",
+                                value=True,
+                                key=f"plan_chk_item_{f_it['id']}_{idx_f}"
+                            )
+                            if is_chk:
+                                chosen_plan_items.append({
+                                    "category": f_it.get("category", "常態督勤"),
+                                    "name": f_it["name"],
+                                    "result": "☑ 符合規範",
+                                    "note": ""
+                                })
+
+                    plan_notes = st.text_area(
+                        "📝 行前備註 / 督導注意事項 (選填)",
+                        placeholder="例：1. 抽查上月義消常訓名冊與 APP 出勤紀錄。\n2. 攜帶公務平板進行通訊測試與照片拍攝。",
+                        height=70,
+                        key="sched_plan_notes"
+                    )
+
+                    sync_calendar = st.checkbox("📅 同步新增此督導行程至【模組二：公務行事曆】", value=True, key="sched_sync_cal")
+
+                    if st.form_submit_button("📅 建立並儲存督導預排期程", type="primary", use_container_width=True):
+                        if not chosen_plan_items:
+                            st.error("請至少勾選一項當天預計查核的重點項目！")
+                        else:
+                            new_plan_record = Inspection(
+                                target_unit=plan_unit,
+                                inspect_date=plan_date,
+                                inspector=plan_inspector,
+                                focus_items=json.dumps(chosen_plan_items, ensure_ascii=False),
+                                score=0,
+                                merit_status="口頭嘉勉",
+                                demerit_status="無重大缺失事項",
+                                strengths=plan_notes.strip() if plan_notes else "",
+                                deficiencies="",
+                                report_text="",
+                                status="預排中"
+                            )
+                            db.add(new_plan_record)
+                            db.commit()
+
+                            if sync_calendar:
+                                cal_event = CalendarEvent(
+                                    title=f"【督導預排】{plan_unit} 業務查核",
+                                    event_date=plan_date,
+                                    event_time="09:30",
+                                    location=f"臺東縣消防局 {plan_unit}",
+                                    event_type="常訓/演練",
+                                    attendees=plan_inspector,
+                                    notes=f"預排查核 {len(chosen_plan_items)} 項重點。備註：{plan_notes.strip() if plan_notes else '無'}",
+                                    status="預定"
+                                )
+                                db.add(cal_event)
+                                db.commit()
+
+                            st.success(f"🎉 已成功建立【{plan_unit}】（預定於 {plan_date.strftime('%Y-%m-%d')}）的督導預排期程！")
+                            st.rerun()
+
+            st.markdown("---")
+
+            # ── 區塊 2：待執行督導預排期程清單 ──
+            st.markdown("#### 📋 待執行督導預排期程清單")
+            
+            if not pending_plans:
+                st.info("💡 目前暫無待執行的預排期程。您可於上方建立新的預排行程！")
             else:
-                raw_lines = [line.strip() for line in DEFAULT_PRESET_FOCUS_TEXT.split("\n") if line.strip()]
-                for idx, line in enumerate(raw_lines, 1):
-                    clean_name = line.lstrip("0123456789.、: -")
-                    active_focus_items.append({"idx": idx, "name": clean_name if clean_name else line, "category": "常態督勤"})
+                st.write(f"目前共有 **{len(pending_plans)}** 筆待執行的督導預排案件：")
+                
+                for plan in pending_plans:
+                    p_items = []
+                    if plan.focus_items:
+                        try:
+                            p_items = json.loads(plan.focus_items)
+                        except Exception:
+                            p_items = []
+
+                    is_today = (plan.inspect_date == today)
+                    is_past = (plan.inspect_date < today)
+                    
+                    if is_today:
+                        badge_color = "#dc2626"
+                        badge_text = "🚨 今日督導"
+                    elif is_past:
+                        badge_color = "#f59e0b"
+                        badge_text = f"⚠️ 已逾期 {(today - plan.inspect_date).days} 天待補填"
+                    else:
+                        badge_color = "#0284c7"
+                        badge_text = f"🟢 預排中（還有 {(plan.inspect_date - today).days} 天）"
+
+                    with st.container(border=True):
+                        c_p_info, c_p_act = st.columns([3, 1.2])
+                        with c_p_info:
+                            st.markdown(
+                                f"""
+                                <div style="font-size: 1.05rem; font-weight: bold; color: #1e3a8a; margin-bottom: 4px;">
+                                    📌 【{plan.target_unit}】 ｜ 預定督勤日：<code>{plan.inspect_date.strftime('%Y-%m-%d')}</code> ｜ 預定督勤員：<b>{plan.inspector}</b>
+                                    <span style="background: {badge_color}18; color: {badge_color}; border: 1px solid {badge_color}; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; margin-left: 8px;">{badge_text}</span>
+                                </div>
+                                """,
+                                unsafe_allow_html=True
+                            )
+                            if p_items:
+                                items_names = "、".join([f"【{it.get('name')}】" for it in p_items])
+                                st.caption(f"🔍 **預定查核重點 ({len(p_items)} 項)**：{items_names}")
+                            if plan.strengths:
+                                st.caption(f"📝 **行前備註**：{plan.strengths}")
+
+                        with c_p_act:
+                            if st.button("🚀 前往現場督勤填報", key=f"start_plan_btn_{plan.id}", type="primary", use_container_width=True):
+                                st.session_state["selected_plan_id"] = plan.id
+                                st.success(f"✅ 已載入【{plan.target_unit}】預排期程！請切換至上方「📝 現場督勤填報」分頁填寫。")
+                                st.rerun()
+
+                            if st.button("🗑️ 取消此預排", key=f"cancel_plan_btn_{plan.id}", use_container_width=True):
+                                db.delete(plan)
+                                db.commit()
+                                st.success(f"已取消【{plan.target_unit}】預排期程！")
+                                st.rerun()
+
+        # ==========================================
+        # TAB 2: 現場督勤填報與處置結論產出 (階段二)
+        # ==========================================
+        with tab_record:
+            st.subheader("📝 現場督勤查核填報與處置結論產出")
+            
+            # ── 頂部快速載入預排督導期程 ──
+            loaded_plan_id = st.session_state.get("selected_plan_id")
+            plan_options = ["✍️ 全新現場督勤填報（未預排）"]
+            plan_map = {}
+            default_opt_idx = 0
+
+            for p_idx, p in enumerate(pending_plans, 1):
+                p_items_count = len(json.loads(p.focus_items or "[]"))
+                opt_label = f"📅 {p.inspect_date.strftime('%Y-%m-%d')} ｜ 【{p.target_unit}】（督勤員：{p.inspector}，預定重點 {p_items_count} 項）"
+                plan_options.append(opt_label)
+                plan_map[opt_label] = p
+                if loaded_plan_id and p.id == loaded_plan_id:
+                    default_opt_idx = p_idx
+
+            c_load1, c_load2 = st.columns([3.5, 1])
+            with c_load1:
+                chosen_plan_label = st.selectbox(
+                    "⚡ 載入預排督導期程 (點選自動帶入受督單位、同仁及當天預定查核重點)：",
+                    plan_options,
+                    index=default_opt_idx,
+                    key="plan_selector_in_tab2"
+                )
+            with c_load2:
+                if chosen_plan_label != "✍️ 全新現場督勤填報（未預排）":
+                    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                    if st.button("❌ 清除載入", use_container_width=True):
+                        st.session_state["selected_plan_id"] = None
+                        st.rerun()
+
+            active_plan_obj = plan_map.get(chosen_plan_label)
+            if active_plan_obj:
+                st.session_state["selected_plan_id"] = active_plan_obj.id
+                st.markdown(
+                    f"""
+                    <div style="background: #f0fdf4; border: 1.5px solid #86efac; border-left: 5px solid #16a34a; border-radius: 6px; padding: 10px 14px; margin-bottom: 12px;">
+                        <b>✅ 已成功載入預排期程</b>：【{active_plan_obj.target_unit}】（預定日期：<code>{active_plan_obj.inspect_date.strftime('%Y-%m-%d')}</code> ｜ 預定同仁：<b>{active_plan_obj.inspector}</b>）<br>
+                        <span style="font-size: 0.85rem; color: #166534;">現場實際查核完成並存檔後，本預排期程將<b>自動轉為正式督勤公文報告</b>！</span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+
+            # 決定表單內顯示的重點項目清單：若有載入預排案件，精確採用該預排所勾選之重點清單！
+            current_form_focus_items = []
+            if active_plan_obj and active_plan_obj.focus_items:
+                try:
+                    p_items_raw = json.loads(active_plan_obj.focus_items)
+                    for idx, it in enumerate(p_items_raw, 1):
+                        current_form_focus_items.append({
+                            "idx": idx,
+                            "name": it.get("name", ""),
+                            "category": it.get("category", "預排重點")
+                        })
+                except Exception:
+                    pass
+
+            if not current_form_focus_items:
+                current_form_focus_items = active_focus_items
 
             # 現場臨時追加新業務督勤項目折疊區
-            with st.expander("➕ 因應新業務/專案臨時追加督勤項目 (選填)", expanded=False):
+            with st.expander("➕ 現場臨時追加其他督勤項目 (選填)", expanded=False):
                 col_n1, col_n2, col_n3 = st.columns([1.2, 2.5, 1])
                 with col_n1:
-                    new_item_cat = st.selectbox("新業務類別", ["新業務專案", "防災士與韌性社區", "科技救災與無人機", "演訓與常訓", "裝備與防汛", "法規與福利宣導", "其他"], key="temp_cat")
+                    new_item_cat = st.selectbox("業務類別", ["義消專長資料庫", "訓練與出勤紀錄", "補助款規定熟悉度", "訓練安全管理", "義消推動制度了解", "常態督勤", "其他專案"], key="temp_cat")
                 with col_n2:
-                    new_item_txt = st.text_input("輸入新業務查核重點名稱", placeholder="例：無人機科技救災飛手證照與圖資傳輸測試", key="temp_txt")
+                    new_item_txt = st.text_input("輸入新業務查核重點名稱", placeholder="例：無人機科技救災操作保養檢測", key="temp_txt")
                 with col_n3:
                     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-                    if st.button("➕ 新增至本次清單", use_container_width=True):
+                    if st.button("➕ 新增至重點庫", use_container_width=True):
                         if new_item_txt.strip():
                             new_f_obj = InspectionFocusItem(
                                 category=new_item_cat,
                                 item_name=new_item_txt.strip(),
-                                description="因應新業務即時新增",
+                                description="",
                                 is_active=True
                             )
                             db.add(new_f_obj)
                             db.commit()
-                            st.success(f"✅ 已成功將新業務項目【{new_item_txt.strip()}】加入督導清單！")
+                            st.success(f"✅ 已成功將【{new_item_txt.strip()}】加入重點項目庫！")
                             st.rerun()
 
             with st.form("inspection_form"):
                 r_col1, r_col2 = st.columns(2)
                 with r_col1:
                     unit_options = [u.unit_name for u in units]
-                    f_unit = st.selectbox("受督導單位 *", unit_options)
-                    f_date = st.date_input("督勤日期 *", value=today)
+                    default_unit_idx = 0
+                    if active_plan_obj and active_plan_obj.target_unit in unit_options:
+                        default_unit_idx = unit_options.index(active_plan_obj.target_unit)
+                    f_unit = st.selectbox("受督導單位 *", unit_options, index=default_unit_idx)
+                    
+                    default_date_val = today if active_plan_obj is None else active_plan_obj.inspect_date
+                    f_date = st.date_input("督勤日期 *", value=default_date_val)
                 with r_col2:
                     current_user = st.session_state.get("user")
-                    default_inspector = current_user.get("display_name", "民力科同仁") if current_user else "民力科同仁"
-                    f_inspector = st.text_input("督勤同仁姓名 *", value=default_inspector)
+                    default_inspector_val = current_user.get("display_name", "民力科同仁") if current_user else "民力科同仁"
+                    if active_plan_obj and active_plan_obj.inspector:
+                        default_inspector_val = active_plan_obj.inspector
+                    f_inspector = st.text_input("督勤同仁姓名 *", value=default_inspector_val)
 
                 st.markdown("---")
-                st.markdown("#### 🔍 督導重點事項現場查核與勾選 (共 %d 項)" % len(active_focus_items))
+                st.markdown("#### 🔍 督導重點事項現場查核與勾選 (共 %d 項)" % len(current_form_focus_items))
                 
                 # 針對 5 大重點項目提供精確對應之現況說明範例
                 ITEM_SPECIFIC_PLACEHOLDERS = {
@@ -283,10 +384,10 @@ def render_inspection_module():
                 }
 
                 preset_notes_dict = load_preset_notes()
-                st.info("💡 **填報說明**：各重點項目之「狀況說明」可**直接點選下拉選單快速套用**，亦可**直接在下方自訂欄位打字**（有打字則優先採用自訂內容）。若需新增或修改下拉選項，請至上方 **「⚙️ 督導重點項目庫管理」** 維護。")
+                st.info("💡 **填報說明**：各重點項目之「狀況說明」可**直接點選下拉選單快速套用**，亦可**直接在下方自訂欄位打字**（有打字則優先採用自訂內容）。若需新增或修改下拉選項，請至上方 **「⚙️ 督導重點項目與選項維護」** 編輯。")
 
                 checked_items = []
-                for it in active_focus_items:
+                for it in current_form_focus_items:
                     it_idx = it["idx"]
                     it_name = it["name"]
                     it_cat = it.get("category", "常態督勤")
@@ -469,22 +570,37 @@ def render_inspection_module():
 *督勤同仁簽章：{f_inspector}　　受督單位主管簽章：___________　　科長核閱：___________*
 """
 
-                        # 1. 存入 SQLite 資料庫
-                        new_insp = Inspection(
-                            target_unit=f_unit,
-                            inspect_date=f_date,
-                            inspector=f_inspector,
-                            focus_items=json.dumps(checked_items, ensure_ascii=False),
-                            score=0,
-                            merit_status=clean_merit,
-                            demerit_status=clean_demerit,
-                            strengths=f_strengths,
-                            deficiencies=f_deficiencies,
-                            report_text=report_md,
-                            status="已存檔"
-                        )
-                        db.add(new_insp)
-                        db.commit()
+                        # 1. 存入 SQLite 資料庫 (若為預排案件直接更新狀態為已存檔，否則新增)
+                        if active_plan_obj:
+                            active_plan_obj.target_unit = f_unit
+                            active_plan_obj.inspect_date = f_date
+                            active_plan_obj.inspector = f_inspector
+                            active_plan_obj.focus_items = json.dumps(checked_items, ensure_ascii=False)
+                            active_plan_obj.merit_status = clean_merit
+                            active_plan_obj.demerit_status = clean_demerit
+                            active_plan_obj.strengths = f_strengths
+                            active_plan_obj.deficiencies = f_deficiencies
+                            active_plan_obj.report_text = report_md
+                            active_plan_obj.status = "已存檔"
+                            target_insp_id = active_plan_obj.id
+                            db.commit()
+                        else:
+                            new_insp = Inspection(
+                                target_unit=f_unit,
+                                inspect_date=f_date,
+                                inspector=f_inspector,
+                                focus_items=json.dumps(checked_items, ensure_ascii=False),
+                                score=0,
+                                merit_status=clean_merit,
+                                demerit_status=clean_demerit,
+                                strengths=f_strengths,
+                                deficiencies=f_deficiencies,
+                                report_text=report_md,
+                                status="已存檔"
+                            )
+                            db.add(new_insp)
+                            db.commit()
+                            target_insp_id = new_insp.id
 
                         # 2. 生成標準 Word (.docx) 並儲存至本地實體目錄
                         docx_buf = generate_inspection_docx(
@@ -499,7 +615,7 @@ def render_inspection_module():
                             report_text=report_md
                         )
                         
-                        file_base_name = f"臺東縣消防局督勤報告_{f_unit}_{f_date.strftime('%Y%m%d')}_{f_inspector}_{new_insp.id}"
+                        file_base_name = f"臺東縣消防局督勤報告_{f_unit}_{f_date.strftime('%Y%m%d')}_{f_inspector}_{target_insp_id}"
                         docx_file_path = REPORTS_DIR / f"{file_base_name}.docx"
                         md_file_path = REPORTS_DIR / f"{file_base_name}.md"
 
@@ -511,7 +627,8 @@ def render_inspection_module():
                         except Exception as e:
                             pass
 
-                        st.session_state["latest_insp_id"] = new_insp.id
+                        st.session_state["selected_plan_id"] = None
+                        st.session_state["latest_insp_id"] = target_insp_id
                         st.session_state["latest_insp_obj"] = {
                             "unit": f_unit,
                             "date": f_date.strftime('%Y-%m-%d'),
@@ -578,7 +695,119 @@ def render_inspection_module():
                     )
 
         # ==========================================
-        # TAB 3: 督導重點項目與狀況說明選項維護
+        # TAB 3: 臺東四大隊半年督勤覆蓋率
+        # ==========================================
+        with tab_coverage:
+            st.subheader("🗺️ 臺東縣消防局轄區分隊督勤覆蓋率看板")
+            
+            # KPI 指標卡片
+            c_kpi1, c_kpi2, c_kpi3, c_kpi4 = st.columns(4)
+            with c_kpi1:
+                st.markdown(
+                    f"""
+                    <div class="kpi-card">
+                        <div class="kpi-title">總受督消防單位數</div>
+                        <div class="kpi-value" style="color: #1e293b;">{total_units} <span style="font-size: 1rem;">所</span></div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+            with c_kpi2:
+                rate_color = "#10b981" if coverage_rate >= 80 else "#f59e0b"
+                st.markdown(
+                    f"""
+                    <div class="kpi-card" style="border-top: 3px solid {rate_color};">
+                        <div class="kpi-title">半年督勤覆蓋率</div>
+                        <div class="kpi-value" style="color: {rate_color};">{coverage_rate}%</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+            with c_kpi3:
+                st.markdown(
+                    f"""
+                    <div class="kpi-card" style="border-top: 3px solid #ef4444;">
+                        <div class="kpi-title" style="color: #b91c1c;">🔴 半年內 0 次</div>
+                        <div class="kpi-value" style="color: #dc2626;">{low_count} <span style="font-size: 1rem;">所</span></div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+            with c_kpi4:
+                st.markdown(
+                    f"""
+                    <div class="kpi-card" style="border-top: 3px solid #10b981;">
+                        <div class="kpi-title" style="color: #15803d;">🟢 覆蓋良好 (>=2次)</div>
+                        <div class="kpi-value" style="color: #16a34a;">{high_count} <span style="font-size: 1rem;">所</span></div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+
+            st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
+
+            # 轄區單位色彩全覽網格
+            st.markdown("### 🏢 臺東縣消防局轄區各大隊分隊督導覆蓋狀態")
+            
+            group_by_mode = st.radio("分組顯示方式", ["🏢 依四大隊及專屬分隊分組 (臺東、關山、成功、大武、局本部專屬任務隊)", "🏷️ 依單位類別分組 (消防大隊、消防分隊、專屬分隊)"], horizontal=True)
+
+            if "四大隊" in group_by_mode:
+                districts_order = [
+                    "臺東大隊轄區",
+                    "臺東大隊(離島)",
+                    "關山大隊轄區",
+                    "成功大隊轄區",
+                    "大武大隊轄區",
+                    "局本部專屬任務隊"
+                ]
+                existing_districts = list(set([u.district for u in units if u.district]))
+                ordered_districts = [d for d in districts_order if d in existing_districts] + [d for d in existing_districts if d not in districts_order]
+                
+                for dist in ordered_districts:
+                    st.write(f"##### 📍 {dist}")
+                    dist_units = [us for us in unit_stats if us["district"] == dist]
+                    
+                    cols = st.columns(4)
+                    for idx, u_stat in enumerate(dist_units):
+                        c = cols[idx % 4]
+                        with c:
+                            days_txt = f"上次：{u_stat['days_since_last']} 天前" if u_stat['days_since_last'] < 900 else "尚未有紀錄"
+                            css_class = f"coverage-{u_stat['status_level']}"
+                            st.markdown(
+                                f"""
+                                <div class="coverage-unit-card {css_class}">
+                                    <div style="font-weight: 700; font-size: 0.95rem;">{u_stat['name']}</div>
+                                    <div style="font-size: 0.8rem; margin-top: 4px;">{u_stat['status_text']}</div>
+                                    <div style="font-size: 0.75rem; opacity: 0.85; margin-top: 2px;">{days_txt}</div>
+                                </div>
+                                """,
+                                unsafe_allow_html=True
+                            )
+            else:
+                categories = sorted(list(set([u.unit_type for u in units])))
+                for cat in categories:
+                    st.write(f"##### 🏢 {cat}")
+                    cat_units = [us for us in unit_stats if us["type"] == cat]
+                    
+                    cols = st.columns(4)
+                    for idx, u_stat in enumerate(cat_units):
+                        c = cols[idx % 4]
+                        with c:
+                            days_txt = f"上次：{u_stat['days_since_last']} 天前" if u_stat['days_since_last'] < 900 else "尚未有紀錄"
+                            css_class = f"coverage-{u_stat['status_level']}"
+                            st.markdown(
+                                f"""
+                                <div class="coverage-unit-card {css_class}">
+                                    <div style="font-weight: 700; font-size: 0.95rem;">{u_stat['name']}</div>
+                                    <div style="font-size: 0.8rem; margin-top: 4px;">{u_stat['status_text']}</div>
+                                    <div style="font-size: 0.75rem; opacity: 0.85; margin-top: 2px;">{days_txt}</div>
+                                </div>
+                                """,
+                                unsafe_allow_html=True
+                            )
+
+        # ==========================================
+        # TAB 5: 督導重點項目與狀況說明選項維護
         # ==========================================
         with tab_settings:
             st.subheader("⚙️ 督導重點項目與現場狀況說明選項維護")
