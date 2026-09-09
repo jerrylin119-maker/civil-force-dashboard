@@ -128,7 +128,7 @@ class InspectionFocusItem(Base):
     is_active = Column(Boolean, default=True)
 
 
-def init_db():
+def init_db(force_reseed: bool = False):
     """初始化資料庫並載入預設種子資料"""
     Base.metadata.create_all(engine)
 
@@ -339,8 +339,8 @@ def init_db():
             ]
             session.add_all(sample_events)
 
-        # 7. 檢查並初始化歷史督勤示範紀錄 (以 5 大最新重點項目為範例)
-        if session.query(Inspection).count() == 0:
+        # 7. 檢查並初始化歷史督勤示範紀錄 (僅在明確要求 force_reseed 時才載入示範資料，避免使用者刪除後被重新填補)
+        if force_reseed and session.query(Inspection).count() == 0:
             today = date.today()
             sample_inspections = [
                 Inspection(

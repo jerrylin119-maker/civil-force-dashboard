@@ -783,8 +783,23 @@ def render_inspection_module():
                             demerit_status=dm_txt,
                             report_text=insp.report_text or ""
                         )
+                    # 操作按鈕列
+                    col_b1, col_b2, col_b3 = st.columns([1.5, 1.2, 1.2])
+                    with col_b1:
+                        # 重新生成 Word 檔案下載
+                        h_buf = generate_inspection_docx(
+                            unit_name=insp.target_unit,
+                            inspect_date=insp.inspect_date.strftime('%Y-%m-%d'),
+                            inspector=insp.inspector,
+                            focus_items=items_list,
+                            strengths=insp.strengths or "",
+                            deficiencies=insp.deficiencies or "",
+                            merit_status=m_txt,
+                            demerit_status=dm_txt,
+                            report_text=insp.report_text or ""
+                        )
                         st.download_button(
-                            label="📥 下載 Word (.docx) 報告",
+                            label="📥 下載 Word 報告",
                             data=h_buf,
                             file_name=f"臺東縣消防局督勤報告_{insp.target_unit}_{insp.inspect_date.strftime('%Y%m%d')}_{insp.id}.docx",
                             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -793,11 +808,37 @@ def render_inspection_module():
                         )
 
                     with col_b2:
-                        pass
+                        show_edit_form = st.checkbox("✏️ 編輯此筆紀錄", key=f"toggle_edit_{insp.id}")
+
+                    with col_b3:
+                        show_delete_confirm = st.checkbox("🗑️ 刪除此筆紀錄", key=f"toggle_del_{insp.id}")
+
+                    # ── 區塊 B：刪除確認對話卡片（直接顯示，絕不被收合擋住） ──
+                    if show_delete_confirm:
+                        st.markdown(
+                            f"""
+                            <div style="background: #fef2f2; border: 1.5px solid #f87171; border-left: 5px solid #dc2626; border-radius: 6px; padding: 10px 14px; margin: 10px 0;">
+                                <b style="color: #991b1b;">⚠️ 請確認是否要永久刪除【{insp.target_unit}】於 {insp.inspect_date.strftime('%Y-%m-%d')} 的督勤紀錄？</b><br>
+                                <span style="font-size: 0.85rem; color: #7f1d1d;">此操作將從資料庫中永久抹除該紀錄，無法復原。</span>
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+                        c_del_btn1, c_del_btn2 = st.columns([1.5, 3])
+                        with c_del_btn1:
+                            if st.button("❌ 確認永久刪除", type="primary", key=f"confirm_delete_btn_{insp.id}", use_container_width=True):
+                                item_to_remove = db.query(Inspection).filter(Inspection.id == insp.id).first()
+                                if item_to_remove:
+                                    db.delete(item_to_remove)
+                                    db.commit()
+                                    st.success(f"🎉 已成功刪除【{insp.target_unit}】的督勤紀錄！")
+                                    st.rerun()
 
                     # ── 區塊 A：編輯修改督勤紀錄表單 ──
-                    with st.expander(f"✏️ 編輯修改【{insp.target_unit}】此筆督勤紀錄", expanded=False):
+                    if show_edit_form:
+                        st.markdown("---")
                         with st.form(f"edit_insp_form_{insp.id}"):
+                            st.markdown(f"#### ✏️ 編輯【{insp.target_unit}】督勤紀錄")
                             st.markdown("##### 🏢 基本資訊修改")
                             ec1, ec2, ec3 = st.columns(3)
                             with ec1:
@@ -928,19 +969,6 @@ def render_inspection_module():
                                 insp.report_text = new_report_md
                                 db.commit()
                                 st.success(f"🎉 已成功更新【{edit_unit}】的督勤紀錄與報告！")
-                                st.rerun()
-
-                    # ── 區塊 B：刪除督勤紀錄 ──
-                    with st.expander("🗑️ 刪除此筆督勤紀錄", expanded=False):
-                        st.warning(f"⚠️ 請確認是否要永久刪除【{insp.target_unit}】於 {insp.inspect_date.strftime('%Y-%m-%d')} 之督勤紀錄？此操作無法復原。")
-                        col_d1, col_d2 = st.columns([2, 1])
-                        with col_d1:
-                            confirm_del = st.checkbox("我確認要永久刪除此紀錄", key=f"conf_del_{insp.id}")
-                        with col_d2:
-                            if st.button("🗑️ 確定刪除", type="secondary", disabled=not confirm_del, key=f"btn_del_{insp.id}", use_container_width=True):
-                                db.delete(insp)
-                                db.commit()
-                                st.success(f"✅ 已成功刪除【{insp.target_unit}】的督勤紀錄！")
                                 st.rerun()
 
     finally:

@@ -174,7 +174,7 @@ def render_settings_module():
             st.markdown("##### ⚠️ 重設系統資料庫為預設示範資料")
             st.caption("此操作將重設公文、行事曆、督勤報告與範本至開箱預設資料，便於示範與測試。")
             if st.button("🔄 重設種子資料庫", type="secondary"):
-                init_db()
+                init_db(force_reseed=True)
                 st.success("✅ 資料庫已成功檢查並補齊種子資料！")
                 st.rerun()
 
